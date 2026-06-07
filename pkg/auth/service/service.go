@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	"github.com/elug3/schick/pkg/auth"
+	"github.com/elug3/schick/pkg/auth/autherrors"
 	"github.com/elug3/schick/pkg/auth/domain"
 	"github.com/elug3/schick/pkg/auth/ports"
 )
@@ -35,11 +35,11 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, er
 		return "", err
 	}
 	if u == nil {
-		return "", auth.ErrInvalidCredentials
+		return "", autherrors.ErrInvalidCredentials
 	}
 
 	if !u.ValidatePassword(password) {
-		return "", auth.ErrInvalidCredentials
+		return "", autherrors.ErrInvalidCredentials
 	}
 
 	token, err := s.tokenGen.Generate(ctx, u.ID)
