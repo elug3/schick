@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/elug3/dupli1/auth/pkg/domain"
 	"github.com/elug3/dupli1/auth/pkg/ports"
 	"github.com/elug3/dupli1/shared/pkg/events"
+	"github.com/elug3/dupli1/shared/pkg/outbox"
 	"github.com/elug3/dupli1/shared/pkg/permissions"
 	"github.com/rs/zerolog"
 )
@@ -37,6 +39,7 @@ type Service struct {
 	sessionStore       ports.SessionStore
 	refreshTokenExpiry time.Duration
 	eventPublisher     ports.EventPublisher
+	outboxDrainer      *outbox.Drainer
 	logger             zerolog.Logger
 }
 
@@ -65,6 +68,15 @@ func WithEventPublisher(pub ports.EventPublisher) ServiceOption {
 	}
 }
 
+// WithOutboxDrainer publishes auth_outbox rows (user.deleted) after a
+// transactional delete. Production always passes this; tests without a
+// Postgres repo omit it and use the in-process publisher instead.
+func WithOutboxDrainer(d *outbox.Drainer) ServiceOption {
+	return func(s *Service) {
+		s.outboxDrainer = d
+	}
+}
+
 // WithLogger sets the logger used for background/best-effort failures.
 func WithLogger(logger zerolog.Logger) ServiceOption {
 	return func(s *Service) {
@@ -82,6 +94,18 @@ func NewService(userRepo ports.UserRepository, tokenGen ports.TokenGenerator, op
 		s.refreshTokenGen = tokenGen
 	}
 	return s
+}
+
+// StartOutboxWorker periodically publishes pending auth_outbox rows.
+func (s *Service) StartOutboxWorker(ctx context.Context, interval time.Duration) {
+	if s.outboxDrainer == nil {
+		return
+	}
+	s.outboxDrainer.StartWorker(ctx, interval)
+}
+
+type userDeletedOutbox interface {
+	DeleteAndEnqueue(ctx context.Context, userID, subject string, payload []byte) error
 }
 
 type userRegisteredEvent struct {
@@ -381,10 +405,15 @@ func (s *Service) ListUsers(ctx context.Context) ([]*domain.User, error) {
 	return users, nil
 }
 
-// DeleteUser permanently removes a user and publishes user.deleted so
-// downstream services (profile) can drop owned PII. The account row is
-// already gone before the event is published — a broker outage must not
-// undo the delete; profile retains orphan rows until a later retry/replay.
+// DeleteUser permanently removes a user and records user.deleted so
+// downstream services (profile) can drop owned PII.
+//
+// When the repo supports a transactional outbox (Postgres), the user row and
+// the outbox event are written in one transaction: the account is gone if and
+// only if the event is durable. The drain worker then publishes to NATS.
+// Without that (tests / in-memory), the event is published first and the row
+// is deleted only after the broker accepts it — a publish failure leaves the
+// account in place rather than orphaning profile PII forever.
 func (s *Service) DeleteUser(ctx context.Context, userID string) error {
 	u, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
@@ -393,15 +422,31 @@ func (s *Service) DeleteUser(ctx context.Context, userID string) error {
 	if u == nil {
 		return autherrors.ErrUserNotFound
 	}
+
+	payload, err := json.Marshal(events.UserDeletedEvent{
+		EventType: events.UserDeleted,
+		UserID:    userID,
+		Occurred:  time.Now().UTC(),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal user.deleted: %w", err)
+	}
+
+	if d, ok := s.userRepo.(userDeletedOutbox); ok {
+		if err := d.DeleteAndEnqueue(ctx, userID, events.UserDeleted, payload); err != nil {
+			return fmt.Errorf("delete user: %w", err)
+		}
+		if s.outboxDrainer != nil {
+			s.outboxDrainer.TryDrain(ctx)
+		}
+		return nil
+	}
+
+	if err := s.publishUserDeleted(ctx, userID); err != nil {
+		return fmt.Errorf("publish user.deleted: %w", err)
+	}
 	if err := s.userRepo.Delete(ctx, userID); err != nil {
 		return fmt.Errorf("delete user: %w", err)
-	}
-	if err := s.publishUserDeleted(ctx, userID); err != nil {
-		s.logger.Error().
-			Str("event", "user_deleted_publish_failed").
-			Str("user_id", userID).
-			Err(err).
-			Msg("user deleted but user.deleted publish failed")
 	}
 	return nil
 }

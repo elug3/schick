@@ -34,6 +34,17 @@ aws ecs update-service --cluster production --service dupli1-notification --forc
 
 Chat IDs: allowlisted users send `/start` to the bot. User IDs: [@userinfobot](https://t.me/userinfobot).
 
+## NATS authorization
+
+Secret: `dupli1/production/nats-token` (JSON key `NATS_TOKEN`). Terraform seeds a random token on first apply and injects it into the NATS server (`--auth`) and every publisher/subscriber task. Rotate by putting a new value and force-deploying nats plus auth, product, order, payment, notification, and profile together.
+
+```bash
+aws secretsmanager put-secret-value --secret-id dupli1/production/nats-token --secret-string '{"NATS_TOKEN":"<new-token>"}'
+for svc in nats auth product order payment notification profile; do
+  aws ecs update-service --cluster production --service dupli1-$svc --force-new-deployment
+done
+```
+
 ## NANO payment (credit card)
 
 Secret: `dupli1/production/nano-payment` (JSON keys `NANO_API_KEY`, `NANO_LOGIN_ID`, `NANO_SHOPCODE`, `NANO_VER`).

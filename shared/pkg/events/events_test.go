@@ -17,6 +17,7 @@ func TestSubjectConstants(t *testing.T) {
 		"OrderStatusUpdate": events.OrderStatusUpdate,
 		"OrderPaid":         events.OrderPaid,
 		"PaymentSucceeded":  events.PaymentSucceeded,
+		"PaymentCanceled":   events.PaymentCanceled,
 		"ProductCreated":    events.ProductCreated,
 		"ProductUpdated":    events.ProductUpdated,
 		"ProductDeleted":    events.ProductDeleted,
@@ -109,6 +110,65 @@ func TestPaymentSucceededEventJSONRoundTrip(t *testing.T) {
 	}
 	if decoded.OrderID != orig.OrderID || decoded.PaymentID != orig.PaymentID || decoded.AmountCents != orig.AmountCents {
 		t.Fatalf("decoded = %+v, want %+v", decoded, orig)
+	}
+}
+
+func TestPaymentCanceledEventJSONRoundTrip(t *testing.T) {
+	orig := events.PaymentCanceledEvent{
+		EventType:      events.PaymentCanceled,
+		OrderID:        "ord_pay",
+		PaymentID:      "pay_nano_1",
+		AmountCents:    70000,
+		RemainingCents: 0,
+		Reason:         "ops reject",
+		CanceledBy:     "mgr_1",
+		Occurred:       time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC),
+	}
+
+	raw, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, key := range []string{"event_type", "order_id", "payment_id", "amount_cents", "remaining_cents"} {
+		if !strings.Contains(string(raw), `"`+key+`"`) {
+			t.Fatalf("missing %q in %s", key, string(raw))
+		}
+	}
+
+	var decoded events.PaymentCanceledEvent
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if decoded.OrderID != orig.OrderID || decoded.PaymentID != orig.PaymentID || decoded.AmountCents != orig.AmountCents {
+		t.Fatalf("decoded = %+v, want %+v", decoded, orig)
+	}
+	if decoded.RemainingCents != 0 || !decoded.RemainingSpecified() {
+		t.Fatalf("remaining = %d specified=%t, want 0 / true", decoded.RemainingCents, decoded.RemainingSpecified())
+	}
+}
+
+func TestPaymentCanceledEvent_OmittedRemainingCentsIsNotSpecified(t *testing.T) {
+	raw := []byte(`{"event_type":"payment.canceled","order_id":"ord_1","payment_id":"pay_1","amount_cents":1000}`)
+	var decoded events.PaymentCanceledEvent
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if decoded.RemainingSpecified() {
+		t.Fatal("omitted remaining_cents must not count as specified")
+	}
+	if decoded.RemainingCents != 0 {
+		t.Fatalf("omitted remaining unmarshals to %d, want 0", decoded.RemainingCents)
+	}
+}
+
+func TestPaymentCanceledEvent_ExplicitZeroRemainingIsSpecified(t *testing.T) {
+	raw := []byte(`{"event_type":"payment.canceled","order_id":"ord_1","payment_id":"pay_1","amount_cents":1000,"remaining_cents":0}`)
+	var decoded events.PaymentCanceledEvent
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !decoded.RemainingSpecified() || decoded.RemainingCents != 0 {
+		t.Fatalf("explicit 0 remaining: specified=%t remaining=%d", decoded.RemainingSpecified(), decoded.RemainingCents)
 	}
 }
 

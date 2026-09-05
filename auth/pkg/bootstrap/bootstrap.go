@@ -16,6 +16,7 @@ import (
 	redisinfra "github.com/elug3/dupli1/auth/pkg/infra/redis"
 	"github.com/elug3/dupli1/auth/pkg/ports"
 	"github.com/elug3/dupli1/auth/pkg/service"
+	"github.com/elug3/dupli1/shared/pkg/outbox"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
@@ -86,6 +87,7 @@ func Bootstrap(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	userRepo := postgres.NewUserRepository(db)
+	outboxDrainer := outbox.NewDrainer(userRepo, eventPublisher, "auth outbox drain")
 
 	var sessionStore ports.SessionStore
 	if redisClient != nil {
@@ -110,8 +112,13 @@ func Bootstrap(ctx context.Context, cfg Config) (*App, error) {
 		service.WithRefreshTokenGen(refreshTokenGen, cfg.RefreshTokenExpiry),
 		service.WithSessionStore(sessionStore),
 		service.WithEventPublisher(eventPublisher),
+		service.WithOutboxDrainer(outboxDrainer),
 		service.WithLogger(cfg.Logger),
 	)
+
+	// Long-lived worker root; cancelled on process shutdown.
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	svc.StartOutboxWorker(workerCtx, 2*time.Second)
 
 	h := handler.NewHandler(svc, cfg.Logger).WithOpenRegister(cfg.OpenRegister)
 	if cfg.OpenRegister {
@@ -125,6 +132,7 @@ func Bootstrap(ctx context.Context, cfg Config) (*App, error) {
 		DB:      db,
 		Redis:   redisClient,
 		close: func() error {
+			workerCancel()
 			var errs []error
 			if redisClient != nil {
 				errs = append(errs, redisClient.Close())

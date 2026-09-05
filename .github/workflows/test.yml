@@ -153,3 +153,19 @@ jobs:
       - name: Test profile module
         working-directory: profile
         run: go test ./... -count=1
+
+  shared:
+    name: shared
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: shared/go.mod
+
+      - name: Test shared module
+        working-directory: shared
+        run: go test ./... -count=1

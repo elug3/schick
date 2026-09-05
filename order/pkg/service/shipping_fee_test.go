@@ -136,3 +136,34 @@ func TestCreateOrder_PublishesShippingFeeInEvent(t *testing.T) {
 		t.Fatalf("event totals do not reconcile: %+v", ev)
 	}
 }
+
+// Completing a session must charge the fee quoted when it opened, even if the
+// configured amount changed mid-checkout.
+func TestCompleteCheckout_UsesSessionQuotedShippingFee(t *testing.T) {
+	ctx := t.Context()
+	repo := memory.NewRepository()
+	svc := service.NewWithCheckout(repo, &fakeStock{reservationID: "res-fee"}, nil, 0).
+		WithProduct(&fakeProduct{defaultCents: 250000}).
+		WithShippingFee(3000)
+
+	session, err := svc.CreateCheckoutSession(ctx, service.CreateCheckoutSessionInput{CustomerID: "customer-1"})
+	if err != nil {
+		t.Fatalf("CreateCheckoutSession: %v", err)
+	}
+	if _, err := svc.UpsertCheckoutItem(ctx, session.ID, domain.OrderItem{SKU: "bag-1", Quantity: 1}); err != nil {
+		t.Fatalf("UpsertCheckoutItem: %v", err)
+	}
+
+	svc.WithShippingFee(9000)
+
+	result, err := svc.CompleteCheckout(ctx, session.ID, testCompleteCheckoutInput())
+	if err != nil {
+		t.Fatalf("CompleteCheckout: %v", err)
+	}
+	if result.Order.ShippingFeeCents != 3000 {
+		t.Fatalf("order shipping = %d, want the session-quoted 3000", result.Order.ShippingFeeCents)
+	}
+	if result.Order.TotalCents != 253000 {
+		t.Fatalf("order total = %d, want 253000", result.Order.TotalCents)
+	}
+}

@@ -92,6 +92,9 @@ func (r *ProfileRepository) GetAddress(_ context.Context, userID, addressID stri
 func (r *ProfileRepository) SaveAddress(_ context.Context, address *domain.Address) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if existing, ok := r.addresses[address.ID]; ok && existing.UserID != address.UserID {
+		return ports.ErrAddressNotFound
+	}
 	cp := *address
 	r.addresses[address.ID] = &cp
 	return nil

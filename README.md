@@ -101,7 +101,7 @@ Full reference: [docs/api.md](docs/api.md). Route index: [docs/endpoints.md](doc
 | PATCH | `/api/v1/auth/users/{id}/permissions` | `user.permissions.update` | Replace permissions / optional `account_type` |
 | PATCH | `/api/v1/auth/users/{id}/password` | `user.password.update` | Set user password |
 | PATCH | `/api/v1/auth/users/{id}/status` | `user.status.update` | Activate / deactivate user |
-| DELETE | `/api/v1/auth/users/{id}` | `user.delete` | Permanently delete user; publishes `user.deleted` (consumed by `profile`) |
+| DELETE | `/api/v1/auth/users/{id}` | `user.delete` | Permanently delete user; enqueues `user.deleted` in the same transaction (consumed by `profile`) |
 
 ### Profile (`dupli1-profile` :8088)
 
@@ -240,6 +240,7 @@ curl -X POST "http://localhost:8080/api/v1/products/{parentId}/images" \
 | `DB_URL` | — | Postgres connection string |
 | `REDIS_URL` | — | Redis URL for rate limiting |
 | `NATS_URL` | — | NATS URL (optional, for pub/sub) |
+| `NATS_TOKEN` | — | Token matching nats-server `--auth` (Compose default `dupli1_nats_dev`) |
 | `JWT_PRIVATE_KEY_FILE` | — | Path to PEM-encoded RSA private key (RS256); ephemeral key used in dev if unset |
 | `JWT_KEY_ID` | `default` | `kid` value in the JWKS document |
 | `JWT_EXPIRATION` | `15m` | Access token lifetime |

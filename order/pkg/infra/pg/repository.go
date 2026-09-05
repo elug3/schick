@@ -869,6 +869,90 @@ func (r *Repository) CancelIfPendingExpired(ctx context.Context, orderID string,
 	return &order, true, nil
 }
 
+func (r *Repository) CancelIfPaidForRefund(ctx context.Context, orderID, paymentID string, now time.Time, events []ports.OutboxEvent) (*domain.Order, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx, `
+		UPDATE orders
+		SET status = $4, updated_at = $5
+		WHERE id = $1 AND status = $2 AND payment_id = $3
+	`, orderID, domain.StatusPaid, paymentID, domain.StatusCanceled, now)
+	if err != nil {
+		return nil, false, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, false, nil
+	}
+
+	var order domain.Order
+	var paidAt, shippedAt *time.Time
+	var shippingJSON []byte
+	err = tx.QueryRow(ctx, `
+		SELECT id, customer_id, reservation_id, status, coupon_code,
+			subtotal_cents, discount_cents, shipping_fee_cents, total_cents,
+			recipient_name, recipient_phone, shipping_address, source_address_id,
+			payment_id, paid_at, payment_due_at, shipped_by, shipped_at, carrier, tracking_number, carrier_note,
+			created_at, updated_at
+		FROM orders WHERE id = $1
+	`, orderID).Scan(
+		&order.ID, &order.CustomerID, &order.ReservationID, &order.Status, &order.CouponCode,
+		&order.SubtotalCents, &order.DiscountCents, &order.ShippingFeeCents, &order.TotalCents,
+		&order.RecipientName, &order.RecipientPhone, &shippingJSON, &order.SourceAddressID,
+		&order.PaymentID, &paidAt, &order.PaymentDueAt, &order.ShippedBy, &shippedAt,
+		&order.Carrier, &order.TrackingNumber, &order.CarrierNote,
+		&order.CreatedAt, &order.UpdatedAt,
+	)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := decodeShippingJSON(shippingJSON, &order.ShippingAddress); err != nil {
+		return nil, false, err
+	}
+	order.PaidAt = paidAt
+	order.ShippedAt = shippedAt
+
+	rows, err := tx.Query(ctx, `
+		SELECT sku, COALESCE(sku_id, ''), quantity, unit_price_cents
+		FROM order_items WHERE order_id = $1 ORDER BY sku
+	`, orderID)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item domain.OrderItem
+		if err := rows.Scan(&item.SKU, &item.SkuID, &item.Quantity, &item.UnitPriceCents); err != nil {
+			return nil, false, err
+		}
+		order.Items = append(order.Items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+
+	for _, ev := range events {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO order_outbox (aggregate_id, subject, payload)
+			VALUES ($1, $2, $3)
+		`, ev.AggregateID, ev.Subject, ev.Payload); err != nil {
+			return nil, false, fmt.Errorf("enqueue outbox: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, err
+	}
+	return &order, true, nil
+}
+
 func (r *Repository) SavePaidIfPending(ctx context.Context, order *domain.Order, events []ports.OutboxEvent) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err

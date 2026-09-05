@@ -52,6 +52,31 @@ func (r *Repository) SaveWithOutbox(ctx context.Context, payment *domain.Payment
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.putLocked(payment, events)
+	return nil
+}
+
+func (r *Repository) MutateLocked(ctx context.Context, id string, mutate func(*domain.Payment) ([]ports.OutboxEvent, error)) (*domain.Payment, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stored, ok := r.payments[id]
+	if !ok {
+		return nil, ports.ErrNotFound
+	}
+	working := *stored
+	events, err := mutate(&working)
+	if err != nil {
+		return nil, err
+	}
+	r.putLocked(&working, events)
+	out := working
+	return &out, nil
+}
+
+func (r *Repository) putLocked(payment *domain.Payment, events []ports.OutboxEvent) {
 	copied := *payment
 	r.payments[payment.ID] = &copied
 	if payment.IdempotencyKey != "" {
@@ -71,7 +96,6 @@ func (r *Repository) SaveWithOutbox(ctx context.Context, payment *domain.Payment
 			},
 		}
 	}
-	return nil
 }
 
 func (r *Repository) Get(ctx context.Context, id string) (*domain.Payment, error) {

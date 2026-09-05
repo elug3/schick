@@ -779,7 +779,7 @@ total_cents = subtotal_cents - discount_cents + shipping_fee_cents
 
 The charge applies to every order regardless of size — there is no free-shipping threshold. A coupon discounts **goods only** and is capped at `subtotal_cents`, so the total can never drop below the shipping fee: a 100%-off coupon still pays delivery. An empty checkout session quotes `total_cents: 0` rather than a bare delivery charge; the fee appears once the session has at least one item.
 
-The fee is **snapshotted** on the order (and on the session when it opens), so changing the configured amount never re-prices an order already placed or a quote already shown. Orders created before this feature carry `shipping_fee_cents: 0` and keep their original totals.
+The fee is **snapshotted** on the checkout session when it opens; `complete` charges that quoted fee even if the configured amount changed. Direct `POST /orders` uses the current configured fee. Orders created before this feature carry `shipping_fee_cents: 0` and keep their original totals.
 
 Because `total_cents` is what the payment service charges and what the order requires to mark itself paid, the fee flows through the money path automatically.
 
@@ -891,7 +891,7 @@ A full cancel moves the payment to `canceled`. A **partial** cancel leaves it `s
 
 `bypass` payments never touched a PG, so they are canceled locally only and the matching refund is made out of band.
 
-The cancel publishes **`payment.canceled`** (NATS, via the payment outbox). **No service subscribes to it yet** — order's paid-cancel still releases stock without triggering a refund, so a `paid` → `canceled` order and its refund remain two separate operator actions.
+The cancel publishes **`payment.canceled`** (NATS, via the payment outbox). Order cancels a still-`paid` order on a full refund when `remaining_cents` is present and `0` and `payment_id` matches; notification alerts ops. Concurrent cancels of the same payment serialize on a row lock so NANO is not called twice.
 
 Unpaid `pending` orders auto-cancel after **5 minutes**. Full design: [payment-service.md](payment-service.md).
 

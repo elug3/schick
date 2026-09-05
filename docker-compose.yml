@@ -127,10 +127,9 @@ services:
 
   nats:
     image: nats:2-alpine
-    command: ["-js"]
+    command: ["-js", "--auth", "${NATS_TOKEN:-dupli1_nats_dev}"]
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - "127.0.0.1:4222:4222"
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 4222"]
       interval: 5s
@@ -179,6 +178,7 @@ services:
       DB_URL: postgres://dupli1:dupli1_dev@postgres-auth:5432/dupli1_db?sslmode=disable
       REDIS_URL: redis://redis:6379
       NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-dupli1_nats_dev}
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-do-not-use-in-production}
       DUPLI1_AUTH_ADDR: :8080
       AUTH_OPEN_REGISTER: "true"
@@ -218,6 +218,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-do-not-use-in-production}
       AUTH_JWKS_URL: http://dupli1-auth:8080/api/v1/auth/.well-known/jwks.json
       NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-dupli1_nats_dev}
       S3_ENDPOINT: http://minio:9000
       # MinIO's Docker-network hostname isn't resolvable by browsers, so image
       # URLs returned to clients route through the nginx gateway (dupli1-proxy)
@@ -267,6 +268,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-do-not-use-in-production}
       AUTH_JWKS_URL: http://dupli1-auth:8080/api/v1/auth/.well-known/jwks.json
       NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-dupli1_nats_dev}
     depends_on:
       postgres-order:
         condition: service_healthy
@@ -331,6 +333,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-do-not-use-in-production}
       AUTH_JWKS_URL: http://dupli1-auth:8080/api/v1/auth/.well-known/jwks.json
       NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-dupli1_nats_dev}
       # NANO Solution certified card PG (optional). When set, credit_card uses NANO;
       # otherwise credit_card is unavailable and card testing uses method=bypass instead.
       # Test creds from NANO API guide; production uses Secrets Manager.
@@ -370,6 +373,7 @@ services:
       DUPLI1_NOTIFICATION_ADDR: :8080
       DUPLI1_NOTIFICATION_DB: postgres://dupli1:dupli1_dev@postgres-notification:5432/notifications?sslmode=disable
       NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-dupli1_nats_dev}
       AUTH_JWKS_URL: http://dupli1-auth:8080/api/v1/auth/.well-known/jwks.json
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-do-not-use-in-production}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
@@ -405,6 +409,7 @@ services:
       AUTH_JWKS_URL: http://dupli1-auth:8080/api/v1/auth/.well-known/jwks.json
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-do-not-use-in-production}
       NATS_URL: nats://nats:4222
+      NATS_TOKEN: ${NATS_TOKEN:-dupli1_nats_dev}
     depends_on:
       postgres-profile:
         condition: service_healthy

@@ -128,6 +128,7 @@ Chat IDs are **routing configuration**, not secrets. Keeping them in Secrets Man
 | `TELEGRAM_ORDER_CHAT_ID` | Fallback routing | Order alerts chat when no DB `alert_order` row |
 | `TELEGRAM_PRODUCT_CHAT_ID` | Fallback routing | Product alerts chat when no DB `alert_product` row |
 | `NATS_URL` | Yes (for dispatch) | e.g. `nats://nats.dupli1.local:4222` |
+| `NATS_TOKEN` | Yes (with `--auth`) | Must match the broker token. Compose default `dupli1_nats_dev`; prod Secrets Manager `dupli1/production/nats-token` |
 | `MANAGE_WEB_URL` | Recommended | Base URL for “View order in manage-web” links (default `https://manage.dupli1.com`) |
 
 Local DB: `postgres://dupli1:dupli1_dev@localhost:5438/notifications?sslmode=disable`

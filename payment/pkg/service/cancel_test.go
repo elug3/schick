@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/elug3/dupli1/payment/pkg/domain"
@@ -358,6 +360,80 @@ func TestCancelPayment_ProviderOvershootIsClampedNotDropped(t *testing.T) {
 	if got.CanceledAmountCents != 70000 {
 		t.Fatalf("canceled = %d, want it clamped to the 70000 total", got.CanceledAmountCents)
 	}
+}
+
+// Two in-flight full cancels must serialize before the PG call so the second
+// sees the payment already closed and does not refund twice.
+func TestCancelPayment_ConcurrentCancelsCallProviderOnce(t *testing.T) {
+	repo := memory.NewRepository()
+	provider := &blockingCancelProvider{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc, seeded := seedSucceededCardPayment(t, repo, provider, &cancelEventPublisher{}, 70000)
+
+	errCh := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := svc.CancelPayment(t.Context(), service.CancelPaymentInput{PaymentID: seeded.ID})
+			errCh <- err
+		}()
+	}
+
+	select {
+	case <-provider.started:
+	case <-t.Context().Done():
+		t.Fatal("first cancel never reached the provider")
+	}
+	close(provider.release)
+	wg.Wait()
+	close(errCh)
+
+	var succeeded, failed int
+	for err := range errCh {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, domain.ErrNotCancelable):
+			failed++
+		default:
+			t.Fatalf("unexpected cancel error: %v", err)
+		}
+	}
+	if succeeded != 1 || failed != 1 {
+		t.Fatalf("outcomes: %d succeeded, %d not-cancelable; want 1 and 1", succeeded, failed)
+	}
+	if got := provider.calls.Load(); got != 1 {
+		t.Fatalf("provider called %d times, want 1", got)
+	}
+
+	stored, err := repo.Get(t.Context(), seeded.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if stored.Status != domain.StatusCanceled || stored.CanceledAmountCents != 70000 {
+		t.Fatalf("stored = %q / %d, want a single full cancel", stored.Status, stored.CanceledAmountCents)
+	}
+}
+
+type blockingCancelProvider struct {
+	fakeCheckoutProvider
+	started chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+	once    sync.Once
+}
+
+func (p *blockingCancelProvider) CancelPayment(_ context.Context, input ports.CancelPaymentInput) (*ports.CancelPaymentResult, error) {
+	n := p.calls.Add(1)
+	if n == 1 {
+		p.once.Do(func() { close(p.started) })
+		<-p.release
+	}
+	return &ports.CancelPaymentResult{CanceledAmountCents: input.AmountCents}, nil
 }
 
 func TestCancelPayment_UnknownPayment(t *testing.T) {

@@ -152,7 +152,7 @@ func (r *ProfileRepository) GetAddress(ctx context.Context, userID, addressID st
 }
 
 func (r *ProfileRepository) SaveAddress(ctx context.Context, address *domain.Address) error {
-	_, err := r.db.ExecContext(ctx, `
+	res, err := r.db.ExecContext(ctx, `
 		INSERT INTO customer_addresses (
 			id, user_id, label, recipient_name, recipient_phone, postal_code,
 			address_line1, address_line2, city, province, pccc, is_default, created_at, updated_at
@@ -168,13 +168,18 @@ func (r *ProfileRepository) SaveAddress(ctx context.Context, address *domain.Add
 			province = EXCLUDED.province,
 			pccc = EXCLUDED.pccc,
 			is_default = EXCLUDED.is_default,
-			updated_at = EXCLUDED.updated_at`,
+			updated_at = EXCLUDED.updated_at
+		WHERE customer_addresses.user_id = EXCLUDED.user_id`,
 		address.ID, address.UserID, address.Label, address.RecipientName, address.RecipientPhone,
 		address.PostalCode, address.AddressLine1, address.AddressLine2, address.City, address.Province,
 		address.PCCC, address.IsDefault, address.CreatedAt, address.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("save address: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ports.ErrAddressNotFound
 	}
 	return nil
 }

@@ -42,7 +42,7 @@ Each service also registers `/health` and `/settings` directly for internal/side
 | `POST` | `/api/v1/auth/logout` | — | Invalidate the current session |
 | `POST` | `/api/v1/auth/refresh` | — | Exchange a refresh token for a new access token |
 | `GET` | `/api/v1/auth/me` | Bearer | Return the authenticated user's account (email, permissions) |
-| `DELETE` | `/api/v1/auth/users/:id` | `user.delete` | Permanently delete user; publishes `user.deleted` (consumed by `profile` to drop owned PII — see [Profile Service](#profile-service)) |
+| `DELETE` | `/api/v1/auth/users/:id` | `user.delete` | Permanently delete user; enqueues `user.deleted` in the same transaction (consumed by `profile` to drop owned PII — see [Profile Service](#profile-service)) |
 | `GET` | `/api/v1/auth/users` | `user.read` | List users (filtered by auth ABAC hierarchy) |
 | `PATCH` | `/api/v1/auth/users/:id/permissions` | `user.permissions.update` | Replace a user's permissions (optional `account_type`) |
 | `PATCH` | `/api/v1/auth/users/:id/password` | `user.password.update` | Set a new password for a user |

@@ -13,6 +13,7 @@ import (
 	natsgo "github.com/nats-io/nats.go"
 
 	"github.com/elug3/dupli1/profile/pkg/ports"
+	"github.com/elug3/dupli1/shared/pkg/natsauth"
 )
 
 // Subscriber listens to NATS subjects and dispatches messages to handlers.
@@ -28,7 +29,7 @@ func NewSubscriber(url string, opts ...natsgo.Option) (*Subscriber, error) {
 		url = natsgo.DefaultURL
 	}
 
-	conn, err := natsgo.Connect(url, opts...)
+	conn, err := natsgo.Connect(url, natsauth.ConnectOpts(opts...)...)
 	if err != nil {
 		return nil, fmt.Errorf("connect nats: %w", err)
 	}

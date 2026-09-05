@@ -42,6 +42,7 @@ data "aws_iam_policy_document" "ecs_execution_secrets" {
       aws_secretsmanager_secret.web_service.arn,
       aws_secretsmanager_secret.order_service.arn,
       aws_secretsmanager_secret.nano_payment.arn,
+      aws_secretsmanager_secret.nats.arn,
     ])
   }
 }

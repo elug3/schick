@@ -158,15 +158,17 @@ func (s *Service) CompleteCheckout(ctx context.Context, sessionID string, input 
 		discountCents = int64(float64(subtotal) * coupon.DiscountFraction)
 	}
 
+	shippingFee := session.ShippingFeeCents
 	order, err := s.CreateOrder(ctx, CreateOrderInput{
-		CustomerID:      session.CustomerID,
-		Items:           pricedItems,
-		CouponCode:      couponCode,
-		DiscountCents:   discountCents,
-		RecipientName:   snapshot.RecipientName,
-		RecipientPhone:  snapshot.RecipientPhone,
-		ShippingAddress: snapshot.ShippingAddress,
-		SourceAddressID: snapshot.SourceAddressID,
+		CustomerID:       session.CustomerID,
+		Items:            pricedItems,
+		CouponCode:       couponCode,
+		DiscountCents:    discountCents,
+		RecipientName:    snapshot.RecipientName,
+		RecipientPhone:   snapshot.RecipientPhone,
+		ShippingAddress:  snapshot.ShippingAddress,
+		SourceAddressID:  snapshot.SourceAddressID,
+		ShippingFeeCents: &shippingFee,
 	})
 	if err != nil {
 		return nil, err

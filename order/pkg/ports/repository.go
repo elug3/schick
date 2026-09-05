@@ -28,6 +28,10 @@ type Repository interface {
 	// CancelIfPendingExpired atomically cancels an order only when it is still pending and past payment_due_at.
 	// Returns the canceled order and true when canceled; false when skipped (paid, already canceled, not expired).
 	CancelIfPendingExpired(ctx context.Context, orderID string, now time.Time, events []OutboxEvent) (*domain.Order, bool, error)
+	// CancelIfPaidForRefund atomically cancels a paid order only when it is still
+	// paid and payment_id matches. Returns false when skipped (already canceled,
+	// shipped, wrong payment, or missing).
+	CancelIfPaidForRefund(ctx context.Context, orderID, paymentID string, now time.Time, events []OutboxEvent) (*domain.Order, bool, error)
 	// SavePaidIfPending atomically persists a paid order only when it is still pending.
 	// Returns true when saved; false when skipped (concurrent cancel or already paid).
 	SavePaidIfPending(ctx context.Context, order *domain.Order, events []OutboxEvent) (bool, error)

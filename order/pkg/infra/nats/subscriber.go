@@ -9,6 +9,7 @@ import (
 	natsgo "github.com/nats-io/nats.go"
 
 	"github.com/elug3/dupli1/order/pkg/ports"
+	"github.com/elug3/dupli1/shared/pkg/natsauth"
 )
 
 // DefaultQueueGroup is the NATS queue group for order service consumers so
@@ -27,7 +28,7 @@ func NewSubscriber(url string, opts ...natsgo.Option) (*Subscriber, error) {
 	if url == "" {
 		url = natsgo.DefaultURL
 	}
-	conn, err := natsgo.Connect(url, opts...)
+	conn, err := natsgo.Connect(url, natsauth.ConnectOpts(opts...)...)
 	if err != nil {
 		return nil, fmt.Errorf("connect nats: %w", err)
 	}

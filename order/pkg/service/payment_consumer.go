@@ -117,23 +117,45 @@ func (s *Service) handlePaymentCanceled(ctx context.Context, _ string, payload [
 		return fmt.Errorf("decode payment.canceled: %w", err)
 	}
 	if event.OrderID == "" || event.PaymentID == "" {
-		return fmt.Errorf("payment.canceled missing order_id or payment_id")
+		log.Printf("payment.canceled missing order_id or payment_id: skip")
+		return nil
+	}
+	if !event.RemainingSpecified() {
+		log.Printf("payment.canceled missing remaining_cents (order %s payment %s): skip", event.OrderID, event.PaymentID)
+		return nil
 	}
 	return s.CancelOrderForRefund(ctx, event.OrderID, event.PaymentID, event.RemainingCents)
 }
 
 // CancelOrderForRefund cancels an order whose payment was fully refunded.
 //
-// Only a full refund cancels: a partial one (remainingCents > 0) leaves money
-// still owed on goods the customer has not been made whole for, and silently
-// cancelling that is worse than leaving it for a human. Likewise an order
-// already shipped — the goods are gone, so this is a return, which the system
-// has no concept of yet. Both cases are logged loudly and left alone.
+// Only a full refund of the order's own payment cancels: a partial one
+// (remainingCents > 0) leaves money still owed on goods the customer has not
+// been made whole for, and silently cancelling that is worse than leaving it
+// for a human. A payload whose payment_id does not match the order is ignored
+// so a spoofed or mis-routed event cannot cancel someone else's paid order.
+// Likewise an order already shipped — the goods are gone, so this is a return,
+// which the system has no concept of yet. Pending orders are left alone: they
+// were never captured. All of those cases are logged and left alone.
+//
+// The status change is atomic (paid + matching payment_id), so a concurrent
+// ship cannot be undone by last-write-wins.
 //
 // Idempotent: a replayed event finds the order already canceled and no-ops,
 // matching how MarkOrderPaid tolerates redelivery.
 func (s *Service) CancelOrderForRefund(ctx context.Context, orderID, paymentID string, remainingCents int64) error {
-	order, err := s.repo.Get(ctx, strings.TrimSpace(orderID))
+	orderID = strings.TrimSpace(orderID)
+	paymentID = strings.TrimSpace(paymentID)
+
+	if remainingCents > 0 {
+		log.Printf(
+			"payment.canceled: order %s partially refunded (payment %s, %d still captured); leaving for manual review",
+			orderID, paymentID, remainingCents,
+		)
+		return nil
+	}
+
+	order, err := s.repo.Get(ctx, orderID)
 	if err != nil {
 		if errors.Is(err, ports.ErrNotFound) {
 			log.Printf("payment.canceled: unknown order %s (payment %s)", orderID, paymentID)
@@ -142,11 +164,10 @@ func (s *Service) CancelOrderForRefund(ctx context.Context, orderID, paymentID s
 		return err
 	}
 
-	if remainingCents > 0 {
+	if paymentID == "" || order.PaymentID != paymentID {
 		log.Printf(
-			"payment.canceled: order %s partially refunded (payment %s, %d still captured); "+
-				"leaving status %s for manual review",
-			order.ID, paymentID, remainingCents, order.Status,
+			"payment.canceled: order %s payment_id %q does not match event payment %q; skip",
+			order.ID, order.PaymentID, paymentID,
 		)
 		return nil
 	}
@@ -161,18 +182,38 @@ func (s *Service) CancelOrderForRefund(ctx context.Context, orderID, paymentID s
 			order.ID, paymentID, order.Status,
 		)
 		return nil
+	case domain.StatusPaid:
+		// continue
+	default:
+		log.Printf(
+			"payment.canceled: order %s is %s (payment %s); only paid orders cancel on a full refund",
+			order.ID, order.Status, paymentID,
+		)
+		return nil
 	}
 
-	if err := order.Cancel(s.now()); err != nil {
+	now := s.now()
+	cancelled := cloneOrder(order)
+	if err := cancelled.Cancel(now); err != nil {
 		return fmt.Errorf("cancel refunded order %s: %w", order.ID, err)
 	}
-	saved, err := s.saveStatusChange(ctx, order)
+	events, err := s.outboxEvents(cancelled, orderUpdatedSubject)
+	if err != nil {
+		return err
+	}
+
+	canceledOrder, didCancel, err := s.repo.CancelIfPaidForRefund(ctx, order.ID, paymentID, now, events)
 	if err != nil {
 		return fmt.Errorf("save refunded order %s: %w", order.ID, err)
 	}
-	if err := s.releaseReservationForCancel(ctx, saved.ReservationID); err != nil {
-		log.Printf("payment.canceled: order %s release reservation %s: %v", saved.ID, saved.ReservationID, err)
+	if !didCancel {
+		log.Printf("payment.canceled: order %s was not still paid with payment %s; skip", order.ID, paymentID)
+		return nil
 	}
-	log.Printf("payment.canceled: order %s canceled after full refund (payment %s)", saved.ID, paymentID)
+	s.tryDrainOutbox(ctx)
+	if err := s.releaseReservationForCancel(ctx, canceledOrder.ReservationID); err != nil {
+		log.Printf("payment.canceled: order %s release reservation %s: %v", canceledOrder.ID, canceledOrder.ReservationID, err)
+	}
+	log.Printf("payment.canceled: order %s canceled after full refund (payment %s)", canceledOrder.ID, paymentID)
 	return nil
 }

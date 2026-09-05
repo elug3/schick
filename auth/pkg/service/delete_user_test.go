@@ -25,7 +25,7 @@ func (r *deleteUserRepo) FindByID(_ context.Context, id string) (*domain.User, e
 	return r.user, nil
 }
 func (r *deleteUserRepo) ListAll(context.Context) ([]*domain.User, error) { return nil, nil }
-func (r *deleteUserRepo) Save(context.Context, *domain.User) error         { return nil }
+func (r *deleteUserRepo) Save(context.Context, *domain.User) error        { return nil }
 func (r *deleteUserRepo) Delete(_ context.Context, id string) error {
 	r.deleted = id
 	r.user = nil
@@ -80,18 +80,18 @@ func (failingPublisher) Publish(context.Context, string, any) error {
 	return errors.New("broker down")
 }
 
-func TestDeleteUser_SucceedsWhenPublishFails(t *testing.T) {
+func TestDeleteUser_FailsWhenPublishFails(t *testing.T) {
 	user, _ := domain.NewUser("u-del-fail", "fail@example.com", "password12", domain.AccountTypeCustomer)
 	repo := &deleteUserRepo{user: user}
 	svc := NewService(repo, fakeTokenGenerator{}, WithEventPublisher(failingPublisher{}))
 
-	if err := svc.DeleteUser(context.Background(), "u-del-fail"); err != nil {
-		t.Fatalf("DeleteUser must succeed even when publish fails: %v", err)
+	if err := svc.DeleteUser(context.Background(), "u-del-fail"); err == nil {
+		t.Fatal("DeleteUser must fail when user.deleted cannot be published")
 	}
-	if repo.deleted != "u-del-fail" {
-		t.Fatalf("deleted = %q, want u-del-fail", repo.deleted)
+	if repo.deleted != "" {
+		t.Fatalf("deleted = %q, want empty — the row must remain if publish fails", repo.deleted)
 	}
-	if repo.user != nil {
-		t.Fatal("user row must be removed before publish attempt")
+	if repo.user == nil {
+		t.Fatal("user row must remain when publish fails")
 	}
 }

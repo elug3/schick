@@ -233,7 +233,9 @@ Sets this address as the sole default, clearing any other. **Response `200`** �
 |-------|-----------|----------|
 | `user.deleted` (`shared/pkg/events.UserDeleted`) | Subscribe | `profile/pkg/consumer/user_deleted.go` decodes the payload and calls `DeleteUserData`, which deletes all of that user's addresses and their profile row in one transaction. Idempotent — safe under NATS at-least-once redelivery. |
 
-Publishing side: `auth`'s `DELETE /api/v1/auth/users/:id` (`user.delete` permission) publishes this event after removing the user. Profile is the only known subscriber today.
+The broker is started with `--auth`. Clients send `NATS_TOKEN` (Compose default `dupli1_nats_dev`; production Secrets Manager `dupli1/production/nats-token`). A TCP client without that token cannot publish `user.deleted`. A compromised Dupli1 service that already has the token still can — this is bus authorization, not per-subject HMAC.
+
+Publishing side: `auth`'s `DELETE /api/v1/auth/users/:id` (`user.delete` permission) writes this event to `auth_outbox` in the same transaction as the user-row delete, then a drain worker publishes to NATS. The delete fails if that outbox write cannot be persisted. Profile is the only known subscriber today.
 
 Profile does **not** publish its own `profile.updated` / `profile.address.created` events — those were scoped as optional in Phase A.2 and were never implemented; nothing currently consumes profile changes.
 
@@ -248,6 +250,7 @@ Profile does **not** publish its own `profile.updated` / `profile.address.create
 | `AUTH_JWKS_URL` | — | RS256 JWKS endpoint on auth |
 | `JWT_SECRET` | — | HS256 dev fallback validator |
 | `DUPLI1_PROFILE_NATS_URL` | — | NATS URL for the `user.deleted` subscription; `NATS_URL` also accepted. Subscription is skipped entirely if unset — deleted users' PII then only gets cleaned up once this is configured. |
+| `NATS_TOKEN` | — | Token matching nats-server `--auth`. Required in Compose/ECS; omit only for in-process tests. |
 
 Local Postgres: `postgres://dupli1:dupli1_dev@localhost:5439/profiles?sslmode=disable`
 

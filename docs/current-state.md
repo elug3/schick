@@ -51,7 +51,7 @@ See [service-layout.md](service-layout.md) for details.
   - Auth ABAC hierarchy governs who may manage whom
   - User admin at `/api/v1/auth/users`; update via `PATCH …/permissions`
   - Customer commerce profile/addresses moved to **`profile`** service (`/api/v1/profile/me/…`); one-release gateway aliases keep `/api/v1/auth/me/profile` and `/api/v1/auth/me/addresses` — [auth-profile-extension-plan.md](auth-profile-extension-plan.md)
-  - `DELETE /api/v1/auth/users/:id` (`user.delete`) publishes `user.deleted` so profile drops owned PII
+  - `DELETE /api/v1/auth/users/:id` (`user.delete`) writes `user.deleted` to a transactional **outbox** in the same Postgres transaction as the user row delete; the drain worker publishes to NATS so profile can drop owned PII. In-memory/tests publish first and refuse the delete if the broker rejects.
   - Owner seeded from `OWNER_EMAIL` / `OWNER_PASSWORD` (`permissions: ["*"]`, `account_type` `manager`)
   - Login lockout after 5 failed attempts for customers/managers, auto-expiring after 15 minutes; **admin and owner are never locked**
   - Deactivated/locked accounts are rejected on their very next authenticated request (not just next login/refresh) — `RequireAuth` re-checks account status on every call
@@ -110,8 +110,9 @@ See [service-layout.md](service-layout.md) for details.
   - Order lifecycle at `/api/v1/orders` — statuses: `pending`, `paid`, `in_transit`, `fulfilled`, `canceled`
   - List: `GET /api/v1/orders` (all — requires `order.read.all`); `GET /api/v1/orders?customer_id=` (ABAC). There is no `/orders/all` or `/orders/me`.
   - Consumes **`payment.succeeded`** (NATS) → `paid` (idempotent on `payment_id`; replays after ship/fulfill are no-ops); late payment on auto-`canceled` orders **re-reserves stock** and reopens the payment window before marking `paid`
+  - Consumes **`payment.canceled`** (NATS) → cancels a still-`paid` order on a full refund (`remaining_cents == 0`) only when `payment_id` matches; omitted `remaining_cents`, partial refunds, pending, and already-shipped orders are skipped. Atomic `paid`+`payment_id` guard so a concurrent ship is not last-write-wins canceled.
   - 5-minute unpaid `pending` expiry worker (skips when payment wins the race)
-  - **Shipping fee:** flat per-order delivery charge via `DUPLI1_ORDER_SHIPPING_FEE_CENTS` (whole KRW, default 30000 = 30,000 KRW; set 0 for free). `total = subtotal - discount + shipping`; no free-shipping threshold; coupons discount goods only. Snapshotted on the order and on the checkout session so a config change never re-prices existing ones
+  - **Shipping fee:** flat per-order delivery charge via `DUPLI1_ORDER_SHIPPING_FEE_CENTS` (whole KRW, default 30000 = 30,000 KRW; set 0 for free). `total = subtotal - discount + shipping`; no free-shipping threshold; coupons discount goods only. Snapshotted on the checkout session when it opens; `complete` charges that quoted fee even if the configured amount changed mid-checkout. Direct `POST /orders` uses the current configured fee.
   - Publishes order events via transactional **outbox** (`order.created` / status updates); outbox drain worker
   - Optional `Idempotency-Key` on `POST /api/v1/orders` (replay-safe create)
   - Checkout `complete` snapshots recipient + shipping address (optional prefill from auth profile)
@@ -142,7 +143,7 @@ See [service-layout.md](service-layout.md) for details.
   - **NANO** certified card PG when `NANO_*` credentials set; else `credit_card` is unavailable (501) and manager **Bypass** is used, including for local testing (see [payment-service.md](payment-service.md))
   - Default payment currency: **`krw` only** (whole won; `*_cents` fields are KRW minor units = won)
   - Publishes **`payment.succeeded`** via transactional **outbox** (soft-success complete; drain + reconcile workers)
-  - **Cancel / refund:** `POST /api/v1/payments/{id}/cancel` (`payment.cancel`, staff-only) calls NANO `/api/payment/cancel.io`; full or partial (`amount_cents`), `Idempotency-Key` honored. Publishes **`payment.canceled`** via outbox — **no subscriber yet**, so order's paid-cancel does not trigger a refund
+  - **Cancel / refund:** `POST /api/v1/payments/{id}/cancel` (`payment.cancel`, staff-only) calls NANO `/api/payment/cancel.io`; full or partial (`amount_cents`), `Idempotency-Key` honored. Concurrent cancels serialize on a row lock (`SELECT … FOR UPDATE` / in-memory mutex) so two in-flight requests cannot both call NANO. Publishes **`payment.canceled`** via outbox; order cancels a still-`paid` matching order on a full refund, notification alerts ops.
   - **Methods:** `method` on create — `credit_card` (NANO; 501 when unconfigured), `bypass` (requires `payment.bypass`; succeeds immediately), `bitcoin` (501). See [payment-methods-plan.md](payment-methods-plan.md)
 - **Auth:** Bearer JWT on customer routes; ownership ABAC unless `payment.create` / `payment.read.all`. Bypass requires `payment.bypass`
 - **Tests:** `cd payment && go test ./...`
@@ -176,7 +177,7 @@ See [service-layout.md](service-layout.md) for details.
 | MinIO `product-images` | product (local) | `minio:9000` via gateway `/product-images/` |
 | S3 + CloudFront OAC | product (AWS) | `images.dupli1.com` — see [product-images-browser-access.md](product-images-browser-access.md) |
 | Redis | auth | `redis:6379` (in Compose) |
-| NATS | auth, order, payment, notification | `nats:4222` (in Compose) |
+| NATS | auth, product, order, payment, notification, profile | `127.0.0.1:4222` in Compose (`--auth` / `NATS_TOKEN`); Cloud Map `nats.dupli1.local` in ECS |
 
 ## API surface (summary)
 

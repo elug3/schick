@@ -141,7 +141,41 @@ func (r *Repository) SaveWithOutbox(ctx context.Context, payment *domain.Payment
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err := persistPaymentTx(ctx, tx, payment, events); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
 
+func (r *Repository) MutateLocked(ctx context.Context, id string, mutate func(*domain.Payment) ([]ports.OutboxEvent, error)) (*domain.Payment, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx, paymentSelect+` WHERE id = $1 FOR UPDATE`, id)
+	payment, err := scanPayment(row)
+	if err != nil {
+		return nil, err
+	}
+	events, err := mutate(payment)
+	if err != nil {
+		return nil, err
+	}
+	if err := persistPaymentTx(ctx, tx, payment, events); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return payment, nil
+}
+
+func persistPaymentTx(ctx context.Context, tx pgx.Tx, payment *domain.Payment, events []ports.OutboxEvent) error {
 	var idempotencyKey any
 	if payment.IdempotencyKey != "" {
 		idempotencyKey = payment.IdempotencyKey
@@ -182,7 +216,7 @@ func (r *Repository) SaveWithOutbox(ctx context.Context, payment *domain.Payment
 	if payment.PayerEmail != "" {
 		payerEmail = payment.PayerEmail
 	}
-	_, err = tx.Exec(ctx, `
+	_, err := tx.Exec(ctx, `
 		INSERT INTO payments (
 			id, order_id, customer_id, amount_cents, currency, status, method,
 			provider, provider_ref, checkout_url, created_by, note,
@@ -224,7 +258,7 @@ func (r *Repository) SaveWithOutbox(ctx context.Context, payment *domain.Payment
 			return fmt.Errorf("enqueue outbox: %w", err)
 		}
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 func (r *Repository) ListSucceededSince(ctx context.Context, since time.Time, limit int) ([]domain.Payment, error) {

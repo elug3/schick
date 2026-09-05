@@ -84,7 +84,7 @@ Create an empty checkout session.
 
 **Pricing.** `total_cents = subtotal_cents - discount_cents + shipping_fee_cents`.
 
-`shipping_fee_cents` is the flat delivery charge quoted for this session (whole KRW, from `DUPLI1_ORDER_SHIPPING_FEE_CENTS`, default 30000; set 0 for free delivery). It is fixed when the session opens, so a config change mid-checkout cannot move the price the customer was shown, and the same amount carries onto the resulting order.
+`shipping_fee_cents` is the flat delivery charge quoted for this session (whole KRW, from `DUPLI1_ORDER_SHIPPING_FEE_CENTS`, default 30000; set 0 for free delivery). It is fixed when the session opens, and `complete` charges that quoted amount even if the configured fee changed mid-checkout. Direct `POST /api/v1/orders` (no session) uses the current configured fee.
 
 A session with **no items** quotes `total_cents: 0` even while `shipping_fee_cents` is non-zero, as above — an empty cart owes nothing to ship. The charge enters the total once the session holds at least one item, and drops out again if every item is removed.
 

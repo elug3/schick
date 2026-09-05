@@ -9,7 +9,10 @@
 // per service.
 package events
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Subject names published over NATS.
 const (
@@ -81,8 +84,9 @@ type PaymentSucceededEvent struct {
 // PaymentCanceledEvent is the payload for PaymentCanceled — published by
 // payment when a succeeded payment is canceled (fully or partially) at the PG.
 // AmountCents is the amount canceled by this event; RemainingCents is what is
-// still captured afterwards (0 on a full cancel). No service subscribes yet —
-// order's paid-cancel refund flow is not wired.
+// still captured afterwards (0 on a full cancel). Order cancels a still-paid
+// order on a full refund (remaining_cents == 0) when payment_id matches;
+// notification alerts ops. A missing remaining_cents must not be treated as 0.
 type PaymentCanceledEvent struct {
 	EventType      string    `json:"event_type"`
 	OrderID        string    `json:"order_id"`
@@ -92,6 +96,43 @@ type PaymentCanceledEvent struct {
 	Reason         string    `json:"reason,omitempty"`
 	CanceledBy     string    `json:"canceled_by,omitempty"`
 	Occurred       time.Time `json:"occurred_at"`
+	remainingSet   bool      `json:"-"`
+}
+
+// RemainingSpecified reports whether remaining_cents was present in the JSON
+// payload. encoding/json treats a missing int64 as 0, which order would
+// otherwise interpret as a full refund.
+func (e PaymentCanceledEvent) RemainingSpecified() bool {
+	return e.remainingSet
+}
+
+func (e *PaymentCanceledEvent) UnmarshalJSON(data []byte) error {
+	type wire struct {
+		EventType      string    `json:"event_type"`
+		OrderID        string    `json:"order_id"`
+		PaymentID      string    `json:"payment_id"`
+		AmountCents    int64     `json:"amount_cents"`
+		RemainingCents *int64    `json:"remaining_cents"`
+		Reason         string    `json:"reason"`
+		CanceledBy     string    `json:"canceled_by"`
+		Occurred       time.Time `json:"occurred_at"`
+	}
+	var w wire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	e.EventType = w.EventType
+	e.OrderID = w.OrderID
+	e.PaymentID = w.PaymentID
+	e.AmountCents = w.AmountCents
+	e.Reason = w.Reason
+	e.CanceledBy = w.CanceledBy
+	e.Occurred = w.Occurred
+	if w.RemainingCents != nil {
+		e.RemainingCents = *w.RemainingCents
+		e.remainingSet = true
+	}
+	return nil
 }
 
 // UserDeletedEvent is the payload for UserDeleted — published by auth,

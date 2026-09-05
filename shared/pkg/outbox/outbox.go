@@ -1,5 +1,5 @@
 // Package outbox implements the drain/retry loop for the transactional
-// outbox pattern used by order and payment: an event row is written in the
+// outbox pattern used by order, payment, and auth: an event row is written in the
 // same DB transaction as the state change, then a Drainer publishes it to
 // the broker and marks it published (or records the failed attempt so the
 // next drain retries it).

@@ -97,6 +97,58 @@ func TestCancelIfPendingExpiredSkipsBeforeDue(t *testing.T) {
 	}
 }
 
+func TestCancelIfPaidForRefundCancelsMatchingPaidOrder(t *testing.T) {
+	ctx := t.Context()
+	repo := memory.NewRepository()
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	order := seedPendingOrder(t, repo, "ord-ref-1", now.Add(-time.Minute))
+	if err := order.MarkPaid("pay-ord-ref-1", order.TotalCents, now); err != nil {
+		t.Fatalf("MarkPaid: %v", err)
+	}
+	if err := repo.Save(ctx, order); err != nil {
+		t.Fatalf("Save paid: %v", err)
+	}
+
+	canceled, ok, err := repo.CancelIfPaidForRefund(ctx, "ord-ref-1", "pay-ord-ref-1", now, nil)
+	if err != nil {
+		t.Fatalf("CancelIfPaidForRefund: %v", err)
+	}
+	if !ok || canceled == nil {
+		t.Fatal("want canceled order")
+	}
+	if canceled.Status != domain.StatusCanceled {
+		t.Fatalf("status = %q, want canceled", canceled.Status)
+	}
+}
+
+func TestCancelIfPaidForRefundSkipsMismatchedPayment(t *testing.T) {
+	ctx := t.Context()
+	repo := memory.NewRepository()
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	order := seedPendingOrder(t, repo, "ord-ref-2", now.Add(-time.Minute))
+	if err := order.MarkPaid("pay-ord-ref-2", order.TotalCents, now); err != nil {
+		t.Fatalf("MarkPaid: %v", err)
+	}
+	if err := repo.Save(ctx, order); err != nil {
+		t.Fatalf("Save paid: %v", err)
+	}
+
+	_, ok, err := repo.CancelIfPaidForRefund(ctx, "ord-ref-2", "pay-other", now, nil)
+	if err != nil {
+		t.Fatalf("CancelIfPaidForRefund: %v", err)
+	}
+	if ok {
+		t.Fatal("expected no cancel on mismatched payment_id")
+	}
+	loaded, err := repo.Get(ctx, "ord-ref-2")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if loaded.Status != domain.StatusPaid {
+		t.Fatalf("status = %q, want paid", loaded.Status)
+	}
+}
+
 func TestSavePaidIfPendingUpdatesOnlyPending(t *testing.T) {
 	ctx := t.Context()
 	repo := memory.NewRepository()

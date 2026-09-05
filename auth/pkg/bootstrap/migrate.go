@@ -32,6 +32,17 @@ func migrateSchema(ctx context.Context, db *sql.DB) error {
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INT NOT NULL DEFAULT 0`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'customer'`,
+		`CREATE TABLE IF NOT EXISTS auth_outbox (
+			id BIGSERIAL PRIMARY KEY,
+			aggregate_id TEXT NOT NULL,
+			subject TEXT NOT NULL,
+			payload JSONB NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			published_at TIMESTAMPTZ,
+			attempts INT NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_auth_outbox_pending ON auth_outbox (created_at) WHERE published_at IS NULL`,
 	}
 
 	for _, stmt := range stmts {

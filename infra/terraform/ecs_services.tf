@@ -160,6 +160,10 @@ locals {
     requires_compatibilities = ["EC2"]
     execution_role_arn       = data.aws_iam_role.ecs_task_execution.arn
   }
+  nats_token_secret = {
+    name      = "NATS_TOKEN"
+    valueFrom = "${aws_secretsmanager_secret.nats.arn}:NATS_TOKEN::"
+  }
 }
 
 resource "aws_ecs_task_definition" "redis" {
@@ -207,13 +211,19 @@ resource "aws_ecs_task_definition" "nats" {
       name      = "nats"
       image     = "nats:2-alpine"
       essential = true
-      command   = ["-js"]
+      # Official image ENTRYPOINT is nats-server; wrap so --auth comes from
+      # Secrets Manager instead of a plaintext task-definition argument.
+      entrypoint = ["/bin/sh", "-c"]
+      command    = ["exec nats-server -js --auth \"$NATS_TOKEN\""]
       portMappings = [
         {
           containerPort = 4222
           hostPort      = 4222
           protocol      = "tcp"
         }
+      ]
+      secrets = [
+        local.nats_token_secret,
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -286,7 +296,9 @@ resource "aws_ecs_task_definition" "auth" {
             name      = "JWT_PRIVATE_KEY"
             valueFrom = var.jwt_private_key_secret_arn
           },
-      ])
+        ],
+        [local.nats_token_secret]
+      )
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -346,6 +358,7 @@ resource "aws_ecs_task_definition" "product" {
           name      = "S3_SECRET_KEY"
           valueFrom = "${aws_secretsmanager_secret.product_s3.arn}:S3_SECRET_KEY::"
         },
+        local.nats_token_secret,
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -403,6 +416,7 @@ resource "aws_ecs_task_definition" "order" {
           name      = "DUPLI1_ORDER_SERVICE_PASSWORD"
           valueFrom = "${aws_secretsmanager_secret.order_service.arn}:DUPLI1_ORDER_SERVICE_PASSWORD::"
         },
+        local.nats_token_secret,
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -506,6 +520,7 @@ resource "aws_ecs_task_definition" "profile" {
             name      = "JWT_SECRET"
             valueFrom = var.jwt_secret_arn
           },
+          local.nats_token_secret,
         ]
       )
       logConfiguration = {
@@ -575,6 +590,7 @@ resource "aws_ecs_task_definition" "payment" {
           name      = "NANO_VER"
           valueFrom = "${aws_secretsmanager_secret.nano_payment.arn}:NANO_VER::"
         },
+        local.nats_token_secret,
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -632,6 +648,7 @@ resource "aws_ecs_task_definition" "notification" {
           name      = "TELEGRAM_ALLOWED_USER_IDS"
           valueFrom = "${var.telegram_secret_arn}:TELEGRAM_ALLOWED_USER_IDS::"
         },
+        local.nats_token_secret,
       ]
       logConfiguration = {
         logDriver = "awslogs"

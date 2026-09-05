@@ -52,6 +52,11 @@ type CreateOrderInput struct {
 	RecipientPhone  string
 	ShippingAddress domain.ShippingAddress
 	SourceAddressID string
+	// ShippingFeeCents, when non-nil, is the delivery charge to snapshot on
+	// this order (checkout complete uses the session quote). Nil uses the
+	// service-configured fee so a direct POST /orders still charges the
+	// current amount.
+	ShippingFeeCents *int64
 }
 
 type CompleteCheckoutInput struct {
@@ -160,7 +165,12 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*dom
 		return nil, err
 	}
 
-	order, err := domain.NewOrder(orderID, input.CustomerID, reservationID, pricedItems, input.CouponCode, input.DiscountCents, s.shippingFeeCents, s.now())
+	shippingFee := s.shippingFeeCents
+	if input.ShippingFeeCents != nil && *input.ShippingFeeCents >= 0 {
+		shippingFee = *input.ShippingFeeCents
+	}
+
+	order, err := domain.NewOrder(orderID, input.CustomerID, reservationID, pricedItems, input.CouponCode, input.DiscountCents, shippingFee, s.now())
 	if err != nil {
 		_ = s.stock.ReleaseReservation(ctx, reservationID)
 		return nil, err

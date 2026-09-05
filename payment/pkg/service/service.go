@@ -426,10 +426,15 @@ type CancelPaymentInput struct {
 
 // CancelPayment cancels a captured payment at the PG and records the result.
 //
-// The PG call happens before any local mutation and local state changes only
-// after the provider confirms, so a rejected or unreachable PG leaves the
-// payment exactly as it was. The reverse order would risk marking money
-// refunded that was never returned.
+// Concurrent cancels serialize on MutateLocked (Postgres FOR UPDATE / in-memory
+// mutex) so two in-flight requests cannot both pass ValidateCancel and both
+// call the PG. The PG call still happens before any local mutation commits, so
+// a rejected or unreachable PG leaves the payment exactly as it was. The
+// reverse order would risk marking money refunded that was never returned.
+//
+// If the process dies after the PG accepts a cancel and before the local
+// write commits, a retry can refund again. That crash window is retained so a
+// rejected PG never records a refund that did not happen.
 //
 // Bypass payments never went through a PG (a manager recorded them by hand), so
 // they are canceled locally and the matching refund is made out of band.
@@ -438,61 +443,55 @@ func (s *Service) CancelPayment(ctx context.Context, input CancelPaymentInput) (
 	if paymentID == "" {
 		return nil, domain.ErrInvalidPayment
 	}
-	payment, err := s.repo.Get(ctx, paymentID)
-	if err != nil {
-		return nil, err
-	}
-
-	// A retry of the cancel we already applied returns the current state rather
-	// than refunding twice.
 	key := strings.TrimSpace(input.IdempotencyKey)
-	if key != "" && payment.CancelIdempotencyKey == key {
-		return payment, nil
-	}
 
-	requested := input.AmountCents
-	if requested == 0 {
-		requested = payment.RemainingCancelableCents()
-	}
-	// Validate before spending a PG round trip.
-	if err := payment.ValidateCancel(requested); err != nil {
-		return nil, err
-	}
-	remainingBefore := payment.RemainingCancelableCents()
-	amount := requested
+	payment, err := s.repo.MutateLocked(ctx, paymentID, func(payment *domain.Payment) ([]ports.OutboxEvent, error) {
+		// A retry of the cancel we already applied returns the current state
+		// rather than refunding twice.
+		if key != "" && payment.CancelIdempotencyKey == key {
+			return nil, nil
+		}
 
-	if payment.Method != domain.MethodBypass {
-		result, err := s.checkout.CancelPayment(ctx, ports.CancelPaymentInput{
-			ProviderRef: payment.ProviderRef,
-			PaymentID:   payment.ID,
-			AmountCents: requested,
-			Currency:    payment.Currency,
-		})
-		if err != nil {
+		requested := input.AmountCents
+		if requested == 0 {
+			requested = payment.RemainingCancelableCents()
+		}
+		// Validate before spending a PG round trip.
+		if err := payment.ValidateCancel(requested); err != nil {
 			return nil, err
 		}
-		// Past this point the provider has confirmed a cancel, so the refund is
-		// real and must be recorded. Any disagreement with our own accounting is
-		// reconciled toward the provider and clamped into a recordable range —
-		// never discarded, which would leave the books showing money we no
-		// longer hold.
-		amount = reconcileCanceledAmount(payment.ID, result, requested, remainingBefore)
-	}
+		remainingBefore := payment.RemainingCancelableCents()
+		amount := requested
 
-	if err := payment.ApplyCancel(amount, input.Reason, input.CanceledBy, s.now()); err != nil {
-		return nil, err
-	}
-	// Keep the previous key when this cancel carried none, so an unkeyed cancel
-	// cannot clear a keyed one and let it replay.
-	if key != "" {
-		payment.CancelIdempotencyKey = key
-	}
+		if payment.Method != domain.MethodBypass {
+			result, err := s.checkout.CancelPayment(ctx, ports.CancelPaymentInput{
+				ProviderRef: payment.ProviderRef,
+				PaymentID:   payment.ID,
+				AmountCents: requested,
+				Currency:    payment.Currency,
+			})
+			if err != nil {
+				return nil, err
+			}
+			// Past this point the provider has confirmed a cancel, so the
+			// refund is real and must be recorded. Any disagreement with our
+			// own accounting is reconciled toward the provider and clamped
+			// into a recordable range — never discarded, which would leave
+			// the books showing money we no longer hold.
+			amount = reconcileCanceledAmount(payment.ID, result, requested, remainingBefore)
+		}
 
-	events, err := s.paymentCanceledOutbox(payment, amount)
+		if err := payment.ApplyCancel(amount, input.Reason, input.CanceledBy, s.now()); err != nil {
+			return nil, err
+		}
+		// Keep the previous key when this cancel carried none, so an unkeyed
+		// cancel cannot clear a keyed one and let it replay.
+		if key != "" {
+			payment.CancelIdempotencyKey = key
+		}
+		return s.paymentCanceledOutbox(payment, amount)
+	})
 	if err != nil {
-		return nil, err
-	}
-	if err := s.repo.SaveWithOutbox(ctx, payment, events); err != nil {
 		return nil, err
 	}
 	s.tryDrainOutbox(ctx)

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/elug3/dupli1/shared/pkg/natsauth"
 	natsgo "github.com/nats-io/nats.go"
 )
 
@@ -31,7 +32,7 @@ func New(url string, opts ...natsgo.Option) (*Publisher, error) {
 		url = natsgo.DefaultURL
 	}
 
-	conn, err := natsgo.Connect(url, opts...)
+	conn, err := natsgo.Connect(url, natsauth.ConnectOpts(opts...)...)
 	if err != nil {
 		return nil, fmt.Errorf("connect nats: %w", err)
 	}

@@ -27,7 +27,7 @@ Production uses **Amazon RDS PostgreSQL 16** (`dupli1-production`).
 | Component | Details |
 |-----------|---------|
 | Databases | `dupli1_db` (auth), `products`, `orders`, `cart`, `payments`, `notifications` (local Compose; wire on ECS — see [TODO.md](TODO.md)) |
-| Credentials | AWS Secrets Manager (`dupli1/production/*-db-url`, `jwt-secret`, `telegram`) |
+| Credentials | AWS Secrets Manager (`dupli1/production/*-db-url`, `jwt-secret`, `telegram`, `nats-token`) |
 | Network | Private subnets; ECS tasks + ECS instances SG → port 5432 |
 | SSL | `sslmode=require` |
 

@@ -107,7 +107,7 @@ func TestPaymentCanceled_ShippedOrderIsLeftForReturnHandling(t *testing.T) {
 			t.Fatalf("Save: %v", err)
 		}
 
-		if err := svc.CancelOrderForRefund(t.Context(), order.ID, "pay-x", 0); err != nil {
+		if err := svc.CancelOrderForRefund(t.Context(), order.ID, "pay-ord_shipped", 0); err != nil {
 			t.Fatalf("%s: %v", status, err)
 		}
 		got, _ := repo.Get(t.Context(), order.ID)
@@ -127,7 +127,7 @@ func TestPaymentCanceled_ReplayIsANoOp(t *testing.T) {
 	order := paidOrderForRefund(t, repo, "ord_refund_3")
 
 	for i := 0; i < 3; i++ {
-		if err := svc.CancelOrderForRefund(t.Context(), order.ID, "pay-x", 0); err != nil {
+		if err := svc.CancelOrderForRefund(t.Context(), order.ID, "pay-ord_refund_3", 0); err != nil {
 			t.Fatalf("delivery %d: %v", i+1, err)
 		}
 	}
@@ -163,7 +163,7 @@ func TestPaymentCanceled_ConsumerHandlesPublishedEvent(t *testing.T) {
 
 	payload, _ := json.Marshal(map[string]any{
 		"event_type": "payment.canceled", "order_id": order.ID,
-		"payment_id": "pay-4", "amount_cents": order.TotalCents, "remaining_cents": 0,
+		"payment_id": "pay-ord_refund_4", "amount_cents": order.TotalCents, "remaining_cents": 0,
 	})
 	if err := sub.handler(t.Context(), "payment.canceled", payload); err != nil {
 		t.Fatalf("handler: %v", err)
@@ -171,5 +171,83 @@ func TestPaymentCanceled_ConsumerHandlesPublishedEvent(t *testing.T) {
 	got, _ := repo.Get(t.Context(), order.ID)
 	if got.Status != domain.StatusCanceled {
 		t.Fatalf("status = %q, want canceled", got.Status)
+	}
+}
+
+// A payload for a different payment must not cancel this order — order IDs are
+// sequential and a spoofed event would otherwise refund the wrong capture.
+func TestPaymentCanceled_MismatchedPaymentIDIsIgnored(t *testing.T) {
+	repo := memory.NewRepository()
+	stock := &fakeStock{}
+	svc := service.New(repo, stock)
+	order := paidOrderForRefund(t, repo, "ord_refund_mismatch")
+
+	if err := svc.CancelOrderForRefund(t.Context(), order.ID, "pay-someone-else", 0); err != nil {
+		t.Fatalf("CancelOrderForRefund: %v", err)
+	}
+	got, _ := repo.Get(t.Context(), order.ID)
+	if got.Status != domain.StatusPaid {
+		t.Fatalf("status = %q, want paid to survive a mismatched payment_id", got.Status)
+	}
+	if stock.released != "" {
+		t.Fatalf("mismatched payment must not release stock, released %q", stock.released)
+	}
+}
+
+// Pending orders were never captured; cancelling them on payment.canceled would
+// drop unpaid reservations that the expiry worker already owns.
+func TestPaymentCanceled_PendingOrderIsLeftAlone(t *testing.T) {
+	repo := memory.NewRepository()
+	stock := &fakeStock{}
+	svc := service.New(repo, stock)
+	now := time.Now().UTC()
+	order, err := domain.NewOrder("ord_pending_refund", "cust-1", "res-pending", []domain.OrderItem{
+		{SKU: "BAG-1", Quantity: 1, UnitPriceCents: 250000},
+	}, "", 0, 30000, now)
+	if err != nil {
+		t.Fatalf("NewOrder: %v", err)
+	}
+	order.PaymentID = "pay-ord_pending_refund"
+	if err := repo.Save(t.Context(), order); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if err := svc.CancelOrderForRefund(t.Context(), order.ID, "pay-ord_pending_refund", 0); err != nil {
+		t.Fatalf("CancelOrderForRefund: %v", err)
+	}
+	got, _ := repo.Get(t.Context(), order.ID)
+	if got.Status != domain.StatusPending {
+		t.Fatalf("status = %q, want pending", got.Status)
+	}
+	if stock.released != "" {
+		t.Fatalf("pending order must not release stock on payment.canceled, released %q", stock.released)
+	}
+}
+
+// encoding/json treats a missing remaining_cents as 0, which would look like a
+// full refund. The consumer must skip that payload instead of cancelling.
+func TestPaymentCanceled_OmittedRemainingCentsDoesNotCancel(t *testing.T) {
+	repo := memory.NewRepository()
+	stock := &fakeStock{}
+	svc := service.New(repo, stock)
+	order := paidOrderForRefund(t, repo, "ord_refund_omit")
+
+	sub := &recordingSubscriber{}
+	if err := svc.RegisterPaymentCanceledConsumer(t.Context(), sub); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"event_type": "payment.canceled", "order_id": order.ID,
+		"payment_id": "pay-ord_refund_omit", "amount_cents": order.TotalCents,
+	})
+	if err := sub.handler(t.Context(), "payment.canceled", payload); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	got, _ := repo.Get(t.Context(), order.ID)
+	if got.Status != domain.StatusPaid {
+		t.Fatalf("status = %q, want paid when remaining_cents is omitted", got.Status)
+	}
+	if stock.released != "" {
+		t.Fatalf("omitted remaining_cents must not release stock, released %q", stock.released)
 	}
 }

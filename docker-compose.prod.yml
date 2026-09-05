@@ -36,6 +36,7 @@ services:
 
   nats:
     ports: []
+    command: ["-js", "--auth", "${NATS_TOKEN:?set NATS_TOKEN in .env.prod}"]
 
   minio:
     ports: []
