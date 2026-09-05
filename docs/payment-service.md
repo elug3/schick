@@ -172,6 +172,31 @@ sequenceDiagram
 
 Order consumer: idempotent on `payment_id`; reject if `amount_cents != order.total_cents`. If the order already carries the same `payment_id` and is no longer `pending` (e.g. `paid`, `in_transit`, or `fulfilled`), a replay is a no-op — the payment reconcile worker republishes for up to two hours after success, so late deliveries must not fail after ship.
 
+### `payment.callback_rejected` (payment → notification)
+
+```json
+{
+  "event_type": "payment.callback_rejected",
+  "provider": "nano",
+  "source": "return",
+  "payment_id": "pay_000023",
+  "order_id": "ord_000023",
+  "reason": "verify_failed",
+  "result_code": "0000",
+  "expected_cents": 31004,
+  "reported_amount": "31004",
+  "tran_no": "260905001496",
+  "detail": "callback hashValue did not verify",
+  "occurred_at": "2026-09-05T11:30:00Z"
+}
+```
+
+Published **only** when the PG reported approval (`resultCode=0000`) and dupli1 still refused the callback — a card probably charged with no paid order behind it. Ordinary declines publish nothing. `source` is `return` (browser) or `webhook`; `reason` is one of `unknown_payment`, `shop_mismatch`, `not_nano_payment`, `amount_mismatch`, `verify_failed`, `lookup_failed`, `persist_failed`.
+
+Published directly rather than through the outbox: no state change accompanies it (that is the problem it reports), and the payment row it would be keyed to may not exist. Delivery is therefore best-effort — the same line is always written to the payment log, prefixed `ALERT`. `reported_amount` is the PG's string, unparsed, so a malformed value survives into the alert instead of being flattened to `0`.
+
+Notification consumer: posts to the order ops chat.
+
 ### `order.paid` (order → notification)
 
 Published when order transitions `pending` → `paid`. Notification formats ops queue message.
@@ -193,6 +218,22 @@ Published when order transitions `pending` → `paid`. Notification formats ops 
 | `POST` | `/api/v1/payments/webhooks/nano` | — | Optional JSON webhook (register URL with NANO) |
 
 NANO success callbacks (`resultCode=0000`) fail closed unless `shopcode` and `reqPayAmt` match the payment and `hashValue` verifies with `NANO_API_KEY` (request-style digest over callback `timestamp`; confirm against merchant return-hash docs).
+
+**Browser return never renders JSON** ([#232](https://github.com/elug3/dupli1/issues/232)). `POST /nano/return` is a form target the shopper's browser follows, so every outcome answers with a page:
+
+| Outcome | Response | `?error=` |
+|---------|----------|-----------|
+| Approved and verified | `303` → `NANO_SUCCESS_URL` | — |
+| Declined by the PG, recorded | `303` → `NANO_FAILURE_URL` | `declined` |
+| Approved but refused here | `303` → `NANO_FAILURE_URL` | `verify_failed` / `amount_mismatch` |
+| Unparseable payload | `303` → `NANO_FAILURE_URL` | `invalid_payload` |
+| Refused, no `NANO_FAILURE_URL` set | `200` self-rendered HTML | — |
+
+The storefront reads `?error=` and suppresses the retry button for the reasons that mean *approved but unconfirmed* (`verify_failed`, `verification_failed`, `invalid_payment`, `amount_mismatch`) — retrying one of those risks a second charge. That list is a cross-repo contract, pinned by `TestNanoReturnUnconfirmedReasonsMatchStorefront` here and `classifyPaymentReturn` in dupli1-web; adding a reason on one side requires adding it to the other.
+
+A refused callback the PG had already approved also publishes `payment.callback_rejected` (see [Events](#events)) so ops hear about a probable charge with no paid order. `POST /webhooks/nano` is server-to-server and keeps its JSON status codes; it publishes the same alert.
+
+**Unresolved:** the 인증결제 v2.7 guide documents no `hashValue` or `timestamp` on the *response*, only on the request, so the verification above may reject every genuine approval. Either NANO signs the return by an undocumented rule (needs their spec) or it is unsigned and approval must be confirmed out-of-band. Until NANO answers, verification stays on and failures are alerted rather than accepted — see the note on `VerifyNanoCallbackHash` in `payment/pkg/infra/checkout/nano.go`.
 
 **Create payment (credit card)**
 ```json

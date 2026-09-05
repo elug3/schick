@@ -217,8 +217,31 @@ func NanoHash(ver, loginID, shopCode, reqPayAmt, timestamp, apiKey string) strin
 //	SHA256(ver+loginId+shopcode+reqPayAmt+timestamp+API_KEY+"NANO")
 //
 // ver/loginId come from merchant config (not client-supplied). shopcode, reqPayAmt,
-// and timestamp must be present on the callback. If NANO’s live return hash differs,
-// update this function to match the merchant API guide — do not disable verification.
+// and timestamp must be present on the callback.
+//
+// UNRESOLVED (elug3/dupli1#232). This is stricter than a guess about the formula:
+// the 인증결제 v2.7 guide lists hashValue and timestamp only in the *request*
+// tables (§2.1 PC, §3.3 mobile). Neither appears in the §2.2 response field list,
+// which documents resultCode, resultMsg, shopcode, compOrderNo, compOrderMem,
+// goodsName, reqPayAmt, orderName, orderTel, orderEmail, tranNo, apprDate,
+// apprTime, apprNo, payWay, receiveUrl, cardNo, cardSrc, cardcode, installment
+// and the vbank/dbank fields — and nothing else. Taken literally, no real approval
+// callback can carry the two fields this function requires, so every one of them
+// is refused, which matches production: no NANO payment has ever reached
+// succeeded through this path.
+//
+// So one of two things is true, and only NANO can say which:
+//
+//  1. the return is signed by an undocumented field/formula — get the spec and
+//     implement it here; or
+//  2. the return is not signed at all — then this check cannot be made to work,
+//     and the browser return must be treated as untrusted, with approval
+//     confirmed out-of-band (a server-side transaction lookup, or the webhook)
+//     before a payment is marked succeeded.
+//
+// Until that answer arrives, do not relax this function: an unverified approval
+// is refused loudly (payment.callback_rejected alerts ops, the shopper is told
+// not to pay again) rather than accepted on the PG's word alone.
 func VerifyNanoCallbackHash(cfg NanoConfig, shopCode, reqPayAmt, timestamp, hashValue string) bool {
 	got := strings.TrimSpace(hashValue)
 	ts := strings.TrimSpace(timestamp)

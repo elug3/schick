@@ -15,14 +15,15 @@ import (
 
 // Subject aliases of the shared event contract — see shared/pkg/events.
 const (
-	SubjectOrderCreated      = events.OrderCreated
-	SubjectOrderStatusUpdate = events.OrderStatusUpdate
-	SubjectOrderPaid         = events.OrderPaid
-	SubjectProductCreated    = events.ProductCreated
-	SubjectProductUpdated    = events.ProductUpdated
-	SubjectProductDeleted    = events.ProductDeleted
-	SubjectProductImage      = events.ProductImage
-	SubjectPaymentCanceled   = events.PaymentCanceled
+	SubjectOrderCreated            = events.OrderCreated
+	SubjectOrderStatusUpdate       = events.OrderStatusUpdate
+	SubjectOrderPaid               = events.OrderPaid
+	SubjectProductCreated          = events.ProductCreated
+	SubjectProductUpdated          = events.ProductUpdated
+	SubjectProductDeleted          = events.ProductDeleted
+	SubjectProductImage            = events.ProductImage
+	SubjectPaymentCanceled         = events.PaymentCanceled
+	SubjectPaymentCallbackRejected = events.PaymentCallbackRejected
 )
 
 type ChatRouting interface {
@@ -52,6 +53,7 @@ func (d *Dispatcher) Register(subscriber ports.EventSubscriber, ctx context.Cont
 		SubjectOrderStatusUpdate,
 		SubjectOrderPaid,
 		SubjectPaymentCanceled,
+		SubjectPaymentCallbackRejected,
 		SubjectProductCreated,
 		SubjectProductUpdated,
 		SubjectProductDeleted,
@@ -76,6 +78,8 @@ func (d *Dispatcher) handle(ctx context.Context, subject string, payload []byte)
 		return d.handleOrder(ctx, subject, payload)
 	case SubjectPaymentCanceled:
 		return d.handlePaymentCanceled(ctx, payload)
+	case SubjectPaymentCallbackRejected:
+		return d.handlePaymentCallbackRejected(ctx, payload)
 	case SubjectProductCreated, SubjectProductUpdated, SubjectProductDeleted, SubjectProductImage:
 		return d.handleProduct(ctx, subject, payload)
 	default:
@@ -152,6 +156,68 @@ func formatPaymentCanceledMessage(event events.PaymentCanceledEvent, manageWebUR
 		escapeHTML(event.OrderID), manageLink,
 		formatMoney(event.AmountCents), reasonLine, byLine,
 	)
+}
+
+// handlePaymentCallbackRejected alerts ops that a PG said it charged a card and
+// dupli1 refused the callback. Nothing downstream fires for this — no order is
+// paid, no payment row moves — so without the alert the only evidence is a line
+// in the payment service log and a shopper who was charged for nothing
+// (elug3/dupli1#232).
+func (d *Dispatcher) handlePaymentCallbackRejected(ctx context.Context, payload []byte) error {
+	var event events.PaymentCallbackRejectedEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return fmt.Errorf("decode payment.callback_rejected event: %w", err)
+	}
+
+	chatID := strings.TrimSpace(d.orderChatID(ctx))
+	if chatID == "" {
+		log.Printf("payment.callback_rejected for %s skipped: order telegram chat not configured", event.PaymentID)
+		return nil
+	}
+
+	if err := d.notifier.Send(ctx, chatID, formatPaymentCallbackRejectedMessage(event, d.cfg.ManageWebURL)); err != nil {
+		return fmt.Errorf("notify payment.callback_rejected: %w", err)
+	}
+	return nil
+}
+
+// formatPaymentCallbackRejectedMessage leads with the action, because whoever
+// reads it has to check the PG console against our records by hand. Every field
+// is best-effort — a callback can be rejected precisely because it identified no
+// payment — so each line is omitted rather than printed empty.
+func formatPaymentCallbackRejectedMessage(event events.PaymentCallbackRejectedEvent, manageWebURL string) string {
+	var b strings.Builder
+	b.WriteString("🚨 <b>Payment approved by PG but rejected here</b>\n")
+	b.WriteString("Check the PG console before the shopper is charged twice.\n")
+
+	if orderID := strings.TrimSpace(event.OrderID); orderID != "" {
+		b.WriteString(fmt.Sprintf("Order: %s\n%s", escapeHTML(orderID), formatManageOrderLink(manageWebURL, orderID)))
+	}
+	if paymentID := strings.TrimSpace(event.PaymentID); paymentID != "" {
+		b.WriteString(fmt.Sprintf("Payment: %s\n", escapeHTML(paymentID)))
+	}
+	if detail := strings.TrimSpace(event.Detail); detail != "" {
+		b.WriteString(fmt.Sprintf("Cause: %s\n", escapeHTML(detail)))
+	} else {
+		b.WriteString(fmt.Sprintf("Cause: %s\n", escapeHTML(event.Reason)))
+	}
+	if event.ExpectedCents > 0 {
+		b.WriteString(fmt.Sprintf("Expected: <b>%s</b>\n", formatMoney(event.ExpectedCents)))
+	}
+	// Reported verbatim: a malformed amount is itself the clue.
+	if reported := strings.TrimSpace(event.ReportedAmount); reported != "" {
+		b.WriteString(fmt.Sprintf("PG reported: <b>%s</b>\n", escapeHTML(reported)))
+	}
+	if tran := strings.TrimSpace(event.TranNo); tran != "" {
+		b.WriteString(fmt.Sprintf("PG transaction: %s\n", escapeHTML(tran)))
+	}
+
+	provider := strings.TrimSpace(event.Provider)
+	if provider == "" {
+		provider = "PG"
+	}
+	b.WriteString(fmt.Sprintf("Source: %s %s callback", escapeHTML(provider), escapeHTML(strings.TrimSpace(event.Source))))
+	return b.String()
 }
 
 func (d *Dispatcher) handleProduct(ctx context.Context, subject string, payload []byte) error {

@@ -251,6 +251,9 @@ type NanoResult struct {
 	PayWay      string `json:"payWay"`
 	Timestamp   string `json:"timestamp"`
 	HashValue   string `json:"hashValue"`
+	// Source is set by the handler, not the PG — json:"-" so a crafted JSON body
+	// cannot forge which endpoint a callback claims to have arrived on.
+	Source string `json:"-"`
 }
 
 // HandleNanoResult marks a NANO card payment succeeded or failed after PG callback.
@@ -261,28 +264,37 @@ type NanoResult struct {
 //   - on resultCode=0000, hashValue must verify against API_KEY (see checkout.VerifyNanoCallbackHash)
 //
 // Browser landing without a valid signed callback does not mark paid.
+//
+// Refusing a callback NANO had already approved publishes payment.callback_rejected:
+// nothing else moves in that case — no payment row changes and no order is paid —
+// so without the alert a charged card leaves no trace anyone watches
+// (elug3/dupli1#232). The returned error carries the reason; see NanoRejection.
 func (s *Service) HandleNanoResult(ctx context.Context, auth NanoCallbackAuth, result NanoResult) (*domain.Payment, error) {
 	paymentID := strings.TrimSpace(result.CompOrderNo)
 	if paymentID == "" {
-		return nil, domain.ErrInvalidPayment
+		return nil, s.nanoReject(ctx, result, NanoRejectUnknownPayment, nil, domain.ErrInvalidPayment)
 	}
 	shop := strings.TrimSpace(result.ShopCode)
 	wantShop := strings.TrimSpace(auth.ShopCode)
 	if wantShop == "" || shop == "" || shop != wantShop {
-		return nil, domain.ErrInvalidPayment
+		return nil, s.nanoReject(ctx, result, NanoRejectShopMismatch, nil, domain.ErrInvalidPayment)
 	}
 	payment, err := s.repo.Get(ctx, paymentID)
 	if err != nil {
-		return nil, err
+		reason := NanoRejectLookupFailed
+		if errors.Is(err, ports.ErrNotFound) {
+			reason = NanoRejectUnknownPayment
+		}
+		return nil, s.nanoReject(ctx, result, reason, nil, err)
 	}
 	if payment.Provider != domain.ProviderNano && !strings.HasPrefix(payment.ProviderRef, "nano_") {
-		return nil, domain.ErrInvalidPayment
+		return nil, s.nanoReject(ctx, result, NanoRejectNotNano, payment, domain.ErrInvalidPayment)
 	}
 	amt := strings.TrimSpace(result.ReqPayAmt)
 	if amt == "" || amt != fmt.Sprintf("%d", payment.AmountCents) {
-		return nil, domain.ErrInvalidPayment
+		return nil, s.nanoReject(ctx, result, NanoRejectAmountMismatch, payment, domain.ErrInvalidPayment)
 	}
-	if strings.TrimSpace(result.ResultCode) != "0000" {
+	if !NanoApproved(result) {
 		if payment.Status == domain.StatusSucceeded {
 			return payment, nil
 		}
@@ -299,7 +311,7 @@ func (s *Service) HandleNanoResult(ctx context.Context, auth NanoCallbackAuth, r
 			ShopCode: auth.ShopCode,
 			APIKey:   auth.APIKey,
 		}, shop, amt, result.Timestamp, result.HashValue) {
-		return nil, domain.ErrInvalidPayment
+		return nil, s.nanoReject(ctx, result, NanoRejectVerifyFailed, payment, domain.ErrInvalidPayment)
 	}
 	if tran := strings.TrimSpace(result.TranNo); tran != "" {
 		payment.ProviderRef = tran
@@ -308,7 +320,9 @@ func (s *Service) HandleNanoResult(ctx context.Context, auth NanoCallbackAuth, r
 		payment.MarkSucceeded(s.now())
 	}
 	if err := s.persistSucceeded(ctx, payment); err != nil {
-		return nil, err
+		// Verified approval that we could not record: the card is charged and the
+		// order is not paid. Alert, and let the caller keep the 500 semantics.
+		return nil, s.nanoReject(ctx, result, NanoRejectPersistFailed, payment, err)
 	}
 	return payment, nil
 }
