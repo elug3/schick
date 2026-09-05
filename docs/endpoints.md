@@ -404,7 +404,7 @@ See [cart-service.md](cart-service.md) for architecture, boundaries with invento
 | `POST` | `/api/v1/payments` | ABAC / `payment.create`; Bypass needs `payment.bypass` | Start payment for a pending order (`method`: `credit_card` default, or `bypass`) |
 | `GET` | `/api/v1/payments/{id}` | ABAC / `payment.read.all` | Payment status |
 | `GET` | `/api/v1/payments/{id}/nano/checkout` | — | Bridge into NANO certified card checkout |
-| `POST` | `/api/v1/payments/nano/return` | — | NANO form `receiveUrl` callback |
+| `POST` | `/api/v1/payments/nano/return` | — | NANO form `receiveUrl` callback; always answers a browser with a redirect or a page, never JSON |
 | `POST` | `/api/v1/payments/webhooks/nano` | — | Optional NANO JSON webhook |
 
 See [payment-service.md](payment-service.md) for NANO / Bypass, 5-minute auto-cancel, and `payment.succeeded` → `paid`. Methods (`credit_card` / `bypass` / `bitcoin` planned): [payment-methods-plan.md](payment-methods-plan.md).

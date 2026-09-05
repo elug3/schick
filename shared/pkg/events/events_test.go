@@ -13,16 +13,17 @@ func TestSubjectConstants(t *testing.T) {
 	// Cross-service NATS wiring depends on these exact strings; a typo breaks
 	// the publisher/subscriber pair silently (messages never delivered).
 	cases := map[string]string{
-		"OrderCreated":      events.OrderCreated,
-		"OrderStatusUpdate": events.OrderStatusUpdate,
-		"OrderPaid":         events.OrderPaid,
-		"PaymentSucceeded":  events.PaymentSucceeded,
-		"PaymentCanceled":   events.PaymentCanceled,
-		"ProductCreated":    events.ProductCreated,
-		"ProductUpdated":    events.ProductUpdated,
-		"ProductDeleted":    events.ProductDeleted,
-		"ProductImage":      events.ProductImage,
-		"UserDeleted":       events.UserDeleted,
+		"OrderCreated":            events.OrderCreated,
+		"OrderStatusUpdate":       events.OrderStatusUpdate,
+		"OrderPaid":               events.OrderPaid,
+		"PaymentSucceeded":        events.PaymentSucceeded,
+		"PaymentCanceled":         events.PaymentCanceled,
+		"PaymentCallbackRejected": events.PaymentCallbackRejected,
+		"ProductCreated":          events.ProductCreated,
+		"ProductUpdated":          events.ProductUpdated,
+		"ProductDeleted":          events.ProductDeleted,
+		"ProductImage":            events.ProductImage,
+		"UserDeleted":             events.UserDeleted,
 	}
 	for name, subject := range cases {
 		if subject == "" {
@@ -233,5 +234,65 @@ func TestUserDeletedEventJSONRoundTrip(t *testing.T) {
 	}
 	if decoded.Occurred.IsZero() {
 		t.Fatal("occurred_at must round-trip")
+	}
+}
+
+func TestPaymentCallbackRejectedJSONRoundTrip(t *testing.T) {
+	occurred := time.Date(2026, 9, 5, 11, 30, 0, 0, time.UTC)
+	orig := events.PaymentCallbackRejectedEvent{
+		EventType:      events.PaymentCallbackRejected,
+		Provider:       "nano",
+		Source:         "return",
+		PaymentID:      "pay_000023",
+		OrderID:        "ord_000023",
+		Reason:         "verify_failed",
+		ResultCode:     "0000",
+		ExpectedCents:  31004,
+		ReportedAmount: "31004",
+		TranNo:         "260905001496",
+		Detail:         "callback hash did not verify",
+		Occurred:       occurred,
+	}
+
+	raw, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatalf("Unmarshal wire: %v", err)
+	}
+	// The subscriber reads these exact keys; renaming one silently empties the alert.
+	for _, key := range []string{"event_type", "provider", "source", "payment_id", "order_id", "reason", "result_code", "expected_cents", "reported_amount", "occurred_at"} {
+		if _, ok := wire[key]; !ok {
+			t.Errorf("wire payload missing %q: %s", key, raw)
+		}
+	}
+
+	var back events.PaymentCallbackRejectedEvent
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if back != orig {
+		t.Fatalf("round trip mismatch:\n got %+v\nwant %+v", back, orig)
+	}
+}
+
+func TestPaymentCallbackRejectedOmitsUnknownPaymentFields(t *testing.T) {
+	// A callback can be rejected because it identified no payment at all; the
+	// alert must still be publishable without inventing ids or amounts.
+	raw, err := json.Marshal(events.PaymentCallbackRejectedEvent{
+		EventType: events.PaymentCallbackRejected,
+		Provider:  "nano",
+		Source:    "webhook",
+		Reason:    "unknown_payment",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, key := range []string{"payment_id", "order_id", "expected_cents", "reported_amount", "tran_no"} {
+		if strings.Contains(string(raw), `"`+key+`"`) {
+			t.Errorf("empty %s should be omitted: %s", key, raw)
+		}
 	}
 }

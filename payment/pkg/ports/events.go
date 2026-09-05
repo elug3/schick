@@ -20,6 +20,13 @@ const PaymentCanceledSubject = events.PaymentCanceled
 // PaymentCanceledEvent is an alias of the shared event payload — see shared/pkg/events.
 type PaymentCanceledEvent = events.PaymentCanceledEvent
 
+// PaymentCallbackRejectedSubject is the NATS subject payment publishes when a PG
+// callback the PG marked approved could not be applied. Alias — see shared/pkg/events.
+const PaymentCallbackRejectedSubject = events.PaymentCallbackRejected
+
+// PaymentCallbackRejectedEvent is an alias of the shared event payload — see shared/pkg/events.
+type PaymentCallbackRejectedEvent = events.PaymentCallbackRejectedEvent
+
 type EventPublisher interface {
 	Publish(ctx context.Context, subject string, event any) error
 }

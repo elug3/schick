@@ -144,6 +144,8 @@ See [service-layout.md](service-layout.md) for details.
   - Default payment currency: **`krw` only** (whole won; `*_cents` fields are KRW minor units = won)
   - Publishes **`payment.succeeded`** via transactional **outbox** (soft-success complete; drain + reconcile workers)
   - **Cancel / refund:** `POST /api/v1/payments/{id}/cancel` (`payment.cancel`, staff-only) calls NANO `/api/payment/cancel.io`; full or partial (`amount_cents`), `Idempotency-Key` honored. Concurrent cancels serialize on a row lock (`SELECT … FOR UPDATE` / in-memory mutex) so two in-flight requests cannot both call NANO. Publishes **`payment.canceled`** via outbox; order cancels a still-`paid` matching order on a full refund, notification alerts ops.
+  - **NANO browser return** (`POST /nano/return`) always answers with a redirect or a page, never a JSON error body; an approval it cannot verify redirects with `?error=verify_failed`, which the storefront renders as *do not pay again* ([#232](https://github.com/elug3/dupli1/issues/232))
+  - Publishes **`payment.callback_rejected`** (direct, not via outbox) when the PG reported approval and dupli1 refused the callback — notification alerts ops that a card may be charged with no paid order
   - **Methods:** `method` on create — `credit_card` (NANO; 501 when unconfigured), `bypass` (requires `payment.bypass`; succeeds immediately), `bitcoin` (501). See [payment-methods-plan.md](payment-methods-plan.md)
 - **Auth:** Bearer JWT on customer routes; ownership ABAC unless `payment.create` / `payment.read.all`. Bypass requires `payment.bypass`
 - **Tests:** `cd payment && go test ./...`
@@ -151,7 +153,7 @@ See [service-layout.md](service-layout.md) for details.
 ### dupli1-notification
 
 - **Host port:** 8084
-- **Features:** NATS subscriber; Telegram ops alerts; webhook or `getUpdates` stores `chat_id` in PostgreSQL; manager API to accept users/chats. See [notification-telegram-bot.md](notification-telegram-bot.md)
+- **Features:** NATS subscriber (`order.*`, `product.*`, `payment.canceled`, `payment.callback_rejected`); Telegram ops alerts; webhook or `getUpdates` stores `chat_id` in PostgreSQL; manager API to accept users/chats. See [notification-telegram-bot.md](notification-telegram-bot.md)
 - **Database:** PostgreSQL `notifications` (`DUPLI1_NOTIFICATION_DB`; local port 5438)
 - **Handler failures** (payload decode, Telegram send) are logged; core NATS does not redeliver, so a failed alert is dropped after the log line
 - **Production:** bot token from Secrets Manager; subscriptions and routing in notification DB
