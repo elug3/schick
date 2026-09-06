@@ -149,6 +149,54 @@ func TestCancelIfPaidForRefundSkipsMismatchedPayment(t *testing.T) {
 	}
 }
 
+func TestShipIfPaidSkipsCanceledOrder(t *testing.T) {
+	ctx := t.Context()
+	repo := memory.NewRepository()
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	order := seedPendingOrder(t, repo, "ord-ship-1", now.Add(-time.Minute))
+	if err := order.MarkPaid("pay-ship-1", order.TotalCents, now); err != nil {
+		t.Fatalf("MarkPaid: %v", err)
+	}
+	if err := repo.Save(ctx, order); err != nil {
+		t.Fatalf("Save paid: %v", err)
+	}
+
+	_, ok, err := repo.CancelIfPaidForRefund(ctx, "ord-ship-1", "pay-ship-1", now, nil)
+	if err != nil {
+		t.Fatalf("CancelIfPaidForRefund: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected refund cancel")
+	}
+
+	beforeShip, err := repo.Get(ctx, "ord-ship-1")
+	if err != nil {
+		t.Fatalf("Get before ship: %v", err)
+	}
+	toShip := *beforeShip
+	toShip.Status = domain.StatusInTransit
+	toShip.ShippedBy = "manager-1"
+	toShip.ShippedAt = &now
+	toShip.Carrier = domain.CarrierCJ
+	toShip.TrackingNumber = "123456789012"
+	toShip.UpdatedAt = now
+
+	saved, err := repo.ShipIfPaid(ctx, &toShip, nil)
+	if err != nil {
+		t.Fatalf("ShipIfPaid: %v", err)
+	}
+	if saved {
+		t.Fatal("expected ShipIfPaid to skip canceled order")
+	}
+	loaded, err := repo.Get(ctx, "ord-ship-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if loaded.Status != domain.StatusCanceled {
+		t.Fatalf("status = %q, want canceled", loaded.Status)
+	}
+}
+
 func TestSavePaidIfPendingUpdatesOnlyPending(t *testing.T) {
 	ctx := t.Context()
 	repo := memory.NewRepository()

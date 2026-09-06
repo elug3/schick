@@ -1038,6 +1038,51 @@ func (r *Repository) SavePaidIfCanceled(ctx context.Context, order *domain.Order
 	return true, nil
 }
 
+func (r *Repository) ShipIfPaid(ctx context.Context, order *domain.Order, events []ports.OutboxEvent) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx, `
+		UPDATE orders SET
+			status = $2,
+			shipped_by = $3,
+			shipped_at = $4,
+			carrier = $5,
+			tracking_number = $6,
+			carrier_note = $7,
+			updated_at = $8
+		WHERE id = $1 AND status = $9
+	`, order.ID, domain.StatusInTransit, order.ShippedBy, order.ShippedAt,
+		order.Carrier, order.TrackingNumber, order.CarrierNote, order.UpdatedAt, domain.StatusPaid)
+	if err != nil {
+		return false, err
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+
+	for _, ev := range events {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO order_outbox (aggregate_id, subject, payload)
+			VALUES ($1, $2, $3)
+		`, ev.AggregateID, ev.Subject, ev.Payload); err != nil {
+			return false, fmt.Errorf("enqueue outbox: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (r *Repository) GetCheckoutSession(ctx context.Context, id string) (*domain.CheckoutSession, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
