@@ -3,6 +3,8 @@ package postgres_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/elug3/dupli1/auth/pkg/bootstrap"
 	"github.com/elug3/dupli1/auth/pkg/domain"
 	"github.com/elug3/dupli1/auth/pkg/infra/postgres"
+	"github.com/elug3/dupli1/shared/pkg/events"
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 )
@@ -205,6 +208,65 @@ func TestDelete_NonExistent(t *testing.T) {
 	ctx := t.Context()
 	if err := repo.Delete(ctx, uuid.New().String()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// DeleteAndEnqueue must remove the user and durably record user.deleted in one
+// transaction so a broker outage cannot orphan profile PII without an event.
+func TestDeleteAndEnqueue_RemovesUserAndEnqueuesEvent(t *testing.T) {
+	requirePostgres(t)
+	ctx := t.Context()
+	u := newTestUser(t)
+	if err := repo.Save(ctx, u); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	payload, err := json.Marshal(events.UserDeletedEvent{
+		EventType: events.UserDeleted,
+		UserID:    u.ID,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := repo.DeleteAndEnqueue(ctx, u.ID, events.UserDeleted, payload); err != nil {
+		t.Fatalf("DeleteAndEnqueue: %v", err)
+	}
+
+	got, err := repo.FindByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("user row must be gone, got %+v", got)
+	}
+
+	pending, err := repo.ListPendingOutbox(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListPendingOutbox: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending outbox = %d, want 1", len(pending))
+	}
+	if pending[0].Subject != events.UserDeleted {
+		t.Fatalf("subject = %q, want %q", pending[0].Subject, events.UserDeleted)
+	}
+	if pending[0].AggregateID != u.ID {
+		t.Fatalf("aggregate_id = %q, want %q", pending[0].AggregateID, u.ID)
+	}
+	var ev events.UserDeletedEvent
+	if err := json.Unmarshal(pending[0].Payload, &ev); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if ev.UserID != u.ID || ev.EventType != events.UserDeleted {
+		t.Fatalf("payload = %+v", ev)
+	}
+}
+
+func TestDeleteAndEnqueue_NotFound(t *testing.T) {
+	requirePostgres(t)
+	err := repo.DeleteAndEnqueue(t.Context(), uuid.New().String(), events.UserDeleted, []byte(`{}`))
+	if !errors.Is(err, autherrors.ErrUserNotFound) {
+		t.Fatalf("got %v, want ErrUserNotFound", err)
 	}
 }
 
