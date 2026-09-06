@@ -623,3 +623,112 @@ func TestNanoCheckout_FailuresRenderAPageNotJSON(t *testing.T) {
 		})
 	}
 }
+
+func getNanoCheckout(t *testing.T, mux *http.ServeMux, paymentID string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/payments/"+paymentID+"/nano/checkout", nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/128.0.0.0")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	return rec
+}
+
+func nanoCheckoutAgainst(t *testing.T, upstream http.Handler) (*http.ServeMux, *domain.Payment, string) {
+	t.Helper()
+	nano := httptest.NewServer(upstream)
+	t.Cleanup(nano.Close)
+	cfg := nanoStorefrontConfig()
+	cfg.BaseURL = nano.URL
+	cfg.HTTPClient = nano.Client()
+	mux, _, _, created := nanoTestStack(t, cfg)
+	return mux, created, nano.URL
+}
+
+// Production GET .../nano/checkout returned 200 text/html with a 0-byte body.
+// An empty 2xx from NANO must not be copied to the shopper.
+func TestNanoCheckout_EmptyUpstreamServesLauncherNotBlankPage(t *testing.T) {
+	mux, created, _ := nanoCheckoutAgainst(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := getNanoCheckout(t, mux, created.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.TrimSpace(body) == "" {
+		t.Fatal("bridge streamed a blank page")
+	}
+	if !strings.Contains(body, "나노페이 결제창으로 이동 중입니다") {
+		t.Fatalf("want launcher HTML, got %s", body)
+	}
+	if strings.Contains(rec.Header().Get("Content-Type"), "application/json") {
+		t.Fatalf("shopper received JSON: %s", body)
+	}
+}
+
+// Following a 302 server-side (default http.Client) lands on a cookie-less empty
+// window. The bridge must hand the absolute Location to the browser instead.
+func TestNanoCheckout_RedirectIsForwardedToBrowser(t *testing.T) {
+	mux, created, base := nanoCheckoutAgainst(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/pay/window", http.StatusFound)
+	}))
+
+	rec := getNanoCheckout(t, mux, created.ID)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body: %s", rec.Code, rec.Body.String())
+	}
+	want := base + "/pay/window"
+	if got := rec.Header().Get("Location"); got != want {
+		t.Fatalf("Location = %q, want %q", got, want)
+	}
+}
+
+func TestNanoCheckout_HTMLWindowIsStreamed(t *testing.T) {
+	const window = "<!DOCTYPE html><html><body>NANO PAY</body></html>"
+	mux, created, _ := nanoCheckoutAgainst(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(window))
+	}))
+
+	rec := getNanoCheckout(t, mux, created.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != window {
+		t.Fatalf("body = %q, want streamed payment window", rec.Body.String())
+	}
+}
+
+func TestNanoCheckout_PayUrlJSONRedirects(t *testing.T) {
+	mux, created, _ := nanoCheckoutAgainst(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"resultCode":"0000","payUrl":"https://pay.nanopay.co.kr/pay/abc"}`))
+	}))
+
+	rec := getNanoCheckout(t, mux, created.ID)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "https://pay.nanopay.co.kr/pay/abc" {
+		t.Fatalf("Location = %q", got)
+	}
+}
+
+func TestNanoCheckout_JSONSuccessWithoutURLUsesLauncher(t *testing.T) {
+	mux, created, _ := nanoCheckoutAgainst(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"resultCode":"0000"}`))
+	}))
+
+	rec := getNanoCheckout(t, mux, created.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "나노페이 결제창으로 이동 중입니다") {
+		t.Fatalf("want launcher, got %s", rec.Body.String())
+	}
+}
