@@ -579,3 +579,47 @@ func TestNanoWebhook_KeepsJSONAndAlertsOnApprovedRejection(t *testing.T) {
 		t.Fatalf("alert source = %q, want webhook", src)
 	}
 }
+
+// The checkout bridge is a URL the shopper's browser is sent to, so it has the
+// same obligation as the return: never a JSON error body (elug3/dupli1#232).
+func TestNanoCheckout_FailuresRenderAPageNotJSON(t *testing.T) {
+	cases := map[string]func(t *testing.T, repo *memory.Repository, created *domain.Payment) string{
+		"unknown payment": func(_ *testing.T, _ *memory.Repository, _ *domain.Payment) string {
+			return "pay_missing"
+		},
+		"payment already settled": func(t *testing.T, repo *memory.Repository, created *domain.Payment) string {
+			created.MarkFailed(time.Now().UTC())
+			if err := repo.Save(t.Context(), created); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+			return created.ID
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			mux, repo, _, created := nanoTestStack(t, nanoStorefrontConfig())
+			id := setup(t, repo, created)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/payments/"+id+"/nano/checkout", nil)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if ct := rec.Header().Get("Content-Type"); strings.Contains(ct, "application/json") {
+				t.Fatalf("shopper received JSON (%s): %s", ct, rec.Body.String())
+			}
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("status = %d, want 303; body: %s", rec.Code, rec.Body.String())
+			}
+			got, err := url.Parse(rec.Header().Get("Location"))
+			if err != nil {
+				t.Fatalf("parse Location: %v", err)
+			}
+			// Nothing was charged — the card window never opened — so the shopper
+			// must be free to try again.
+			reason := got.Query().Get("error")
+			if reason != "checkout_failed" {
+				t.Fatalf("error = %q, want checkout_failed", reason)
+			}
+		})
+	}
+}
