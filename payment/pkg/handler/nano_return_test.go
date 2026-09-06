@@ -124,3 +124,10 @@ func TestAppendNanoReturnQuery(t *testing.T) {
 		})
 	}
 }
+
+// A bridge failure means the card window never opened, so it must stay retryable.
+func TestNanoReturnCheckoutFailedIsRetryable(t *testing.T) {
+	if nanoReturnUnconfirmedReasons[nanoReturnCheckoutFailed] {
+		t.Fatalf("%q must not suppress the retry button — nothing was charged", nanoReturnCheckoutFailed)
+	}
+}

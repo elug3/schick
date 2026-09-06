@@ -208,22 +208,34 @@ func (h *Handler) cancelPayment(w http.ResponseWriter, r *http.Request, paymentI
 
 // nanoCheckout bridges the browser into NANO certified checkout (PC or mobile).
 // It POSTs a freshly signed request server-side and streams HTML / redirects.
+//
+// It is navigated to directly by the shopper (it is the checkout_url handed to
+// the storefront), so like nanoReturn it must answer with a page rather than a
+// JSON error body — elug3/dupli1#232 applies here too.
+//
+// Every failure on this path is safe to retry: the card window has not opened
+// yet, so nothing has been charged. That is why the bridge always uses
+// nanoReturnCheckoutFailed and never an unconfirmed reason.
 func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID string) {
 	if h.nano == nil {
 		respondError(w, http.StatusNotFound, "not found")
 		return
 	}
+	cfg := h.nano.Config()
 	payment, err := h.svc.GetPayment(r.Context(), paymentID, "")
 	if err != nil {
-		respondServiceError(w, err)
+		log.Printf("payment: nano checkout %s: load payment: %v", paymentID, err)
+		h.failNanoReturn(w, r, cfg, "", paymentID, nanoReturnCheckoutFailed)
 		return
 	}
 	if payment.Status != domain.StatusRequiresPayment {
-		respondError(w, http.StatusBadRequest, "payment is not awaiting checkout")
+		log.Printf("payment: nano checkout %s: status is %s, not awaiting checkout", payment.ID, payment.Status)
+		h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 		return
 	}
 	if payment.Provider != domain.ProviderNano {
-		respondError(w, http.StatusBadRequest, "payment is not a nano checkout")
+		log.Printf("payment: nano checkout %s: provider is %s, not nano", payment.ID, payment.Provider)
+		h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 		return
 	}
 
@@ -234,23 +246,25 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 		"Dupli1 "+payment.OrderID, payment.AmountCents, mobile,
 	)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
+		log.Printf("payment: nano checkout %s: build nano request: %v", payment.ID, err)
+		h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 		return
 	}
 
 	payload, err := json.Marshal(body)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "internal error")
+		log.Printf("payment: nano checkout %s: marshal request: %v", payment.ID, err)
+		h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 		return
 	}
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, reqURL, strings.NewReader(string(payload)))
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "internal error")
+		log.Printf("payment: nano checkout %s: build request: %v", payment.ID, err)
+		h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("CharSet", "UTF-8")
-	cfg := h.nano.Config()
 	if cfg.APIKey != "" {
 		req.Header.Set("API_KEY", cfg.APIKey)
 	}
@@ -268,7 +282,8 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
-		respondError(w, http.StatusBadGateway, "nano upstream read failed")
+		log.Printf("payment: nano checkout %s: read upstream: %v", payment.ID, err)
+		h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 		return
 	}
 
@@ -288,7 +303,12 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 			}
 			if code, _ := parsed["resultCode"].(string); code != "" && code != "0000" {
 				msg, _ := parsed["resultMsg"].(string)
-				respondError(w, http.StatusBadGateway, "nano checkout failed: "+msg)
+				// NANO's resultMsg is an operator diagnostic — it carries their
+				// internal identifiers (mbrNo, mbrRefNo) and means nothing to a
+				// shopper. Log it, show them a page.
+				log.Printf("payment: nano checkout %s rejected: resultCode=%s resultMsg=%s",
+					payment.ID, code, truncateForLog(msg, 300))
+				h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 				return
 			}
 		}
@@ -381,6 +401,10 @@ const (
 	nanoReturnVerifyFailed   = "verify_failed"
 	nanoReturnAmountMismatch = "amount_mismatch"
 	nanoReturnInvalidPayload = "invalid_payload"
+	// nanoReturnCheckoutFailed is the bridge's reason: NANO never opened a card
+	// window, so nothing was charged and paying again is safe. Deliberately not in
+	// nanoReturnUnconfirmedReasons.
+	nanoReturnCheckoutFailed = "checkout_failed"
 )
 
 // nanoReturnUnconfirmedReasons mirrors the storefront's UNCONFIRMED_REASONS set.
