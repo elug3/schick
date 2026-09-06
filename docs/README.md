@@ -16,6 +16,7 @@ When the API surface changes, update [current-state.md](current-state.md) and [a
 | [service-layout.md](service-layout.md) | Module / directory layout |
 | [TODO.md](TODO.md) | Living backlog and schedule |
 | [payment-service.md](payment-service.md) | Money path (NANO / Bypass) |
+| [payment-nano-return-verification.md](payment-nano-return-verification.md) | **Blocked on NANO** — why no card payment can succeed, and the question that unblocks it |
 | [checkout-session.md](checkout-session.md) | Checkout sessions in order |
 | [cart-service.md](cart-service.md) | Persistent cart |
 | [profile-service.md](profile-service.md) | Customer commerce profile + saved addresses |

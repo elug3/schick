@@ -233,7 +233,7 @@ The storefront reads `?error=` and suppresses the retry button for the reasons t
 
 A refused callback the PG had already approved also publishes `payment.callback_rejected` (see [Events](#events)) so ops hear about a probable charge with no paid order. `POST /webhooks/nano` is server-to-server and keeps its JSON status codes; it publishes the same alert.
 
-**Unresolved:** the 인증결제 v2.7 guide documents no `hashValue` or `timestamp` on the *response*, only on the request, so the verification above may reject every genuine approval. Either NANO signs the return by an undocumented rule (needs their spec) or it is unsigned and approval must be confirmed out-of-band. Until NANO answers, verification stays on and failures are alerted rather than accepted — see the note on `VerifyNanoCallbackHash` in `payment/pkg/infra/checkout/nano.go`.
+**Unresolved — card payments cannot succeed today.** The 인증결제 v2.7 guide documents no `hashValue` or `timestamp` on the *response*, only on the request, so the verification above rejects every genuine approval: **0 of 18** NANO payments have ever reached `succeeded`. Either NANO signs the return by an undocumented rule (needs their spec) or it is unsigned and approval must be confirmed out-of-band. Until NANO answers, verification stays on and failures are alerted rather than accepted. Full record, evidence, and the question to ask NANO: **[payment-nano-return-verification.md](payment-nano-return-verification.md)**.
 
 **Create payment (credit card)**
 ```json
