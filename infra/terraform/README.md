@@ -14,7 +14,7 @@ Terraform provisions the production compute path on the existing VPC and RDS:
 | CloudWatch Logs | `/ecs/dupli1-*` log groups |
 | ECS services | auth, product, order, cart, payment, notification, profile, proxy, web, manage-web, redis, nats |
 
-Existing resources reused (not recreated): VPC `dupli1-prod-vpc`, ECS cluster `production`, RDS `dupli1-production`, ECR repos, Cloud Map `dupli1.local`, Secrets Manager DB URLs / JWT / Telegram.
+Existing resources reused (not recreated): VPC `dupli1-prod-vpc`, ECS cluster `production`, RDS `dupli1-production`, ECR repos, Cloud Map `dupli1.local`, Secrets Manager DB URLs / JWT / Telegram. A missing ECR repo for a new matrix service (for example `dupli1-profile`) is created by `.github/workflows/aws.yml` on the first push to `main`, not by this Terraform.
 
 ## Telegram (notification)
 

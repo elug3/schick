@@ -103,6 +103,8 @@ After Phase 1 cleanup (2026-07-26): orphans removed, ASG **5×`t3.large`**. Targ
 
 Backend (`dupli1`) and frontends (`dupli1-web`, `dupli1-manage-web`) deploy via **GitHub OIDC** and IAM role `github-actions-deploy-role` (ECR push + ECS deploy). Do not use long-lived `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` secrets for CI.
 
+`.github/workflows/aws.yml` creates a missing ECR repository before push (scan-on-push, AES256). Terraform looks up those repos with `data.aws_ecr_repository` and does not create them.
+
 ## Local development
 
 Local development still uses Docker Compose. See the root `README.md`. For a single-box EC2 alternative, see [deployment-ec2.md](deployment-ec2.md).

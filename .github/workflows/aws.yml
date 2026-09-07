@@ -72,6 +72,24 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # Existing services were created outside Terraform (data.aws_ecr_repository
+      # lookups). New services such as dupli1-profile would otherwise fail the
+      # push with: "The repository with name '…' does not exist in the registry".
+      - name: Ensure ECR repository exists
+        if: github.event_name != 'pull_request'
+        env:
+          ECR_REPOSITORY: ${{ matrix.service }}
+        run: |
+          if aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null 2>&1; then
+            echo "ECR repository $ECR_REPOSITORY already exists"
+          else
+            echo "Creating ECR repository $ECR_REPOSITORY"
+            aws ecr create-repository \
+              --repository-name "$ECR_REPOSITORY" \
+              --image-scanning-configuration scanOnPush=true \
+              --encryption-configuration encryptionType=AES256
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
