@@ -32,6 +32,9 @@ type Repository interface {
 	// paid and payment_id matches. Returns false when skipped (already canceled,
 	// shipped, wrong payment, or missing).
 	CancelIfPaidForRefund(ctx context.Context, orderID, paymentID string, now time.Time, events []OutboxEvent) (*domain.Order, bool, error)
+	// ShipIfPaid atomically marks a paid order in_transit only when it is still paid.
+	// Returns true when shipped; false when skipped (concurrent cancel/refund or already shipped).
+	ShipIfPaid(ctx context.Context, order *domain.Order, events []OutboxEvent) (bool, error)
 	// SavePaidIfPending atomically persists a paid order only when it is still pending.
 	// Returns true when saved; false when skipped (concurrent cancel or already paid).
 	SavePaidIfPending(ctx context.Context, order *domain.Order, events []OutboxEvent) (bool, error)

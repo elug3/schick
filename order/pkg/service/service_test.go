@@ -568,6 +568,65 @@ func TestShipOrderRetriesWhenReservationAlreadyCommitted(t *testing.T) {
 	}
 }
 
+type refundDuringShipStock struct {
+	*fakeStock
+	onAfterCommit func()
+}
+
+func (f *refundDuringShipStock) CommitReservation(ctx context.Context, reservationID string) error {
+	err := f.fakeStock.CommitReservation(ctx, reservationID)
+	if err != nil {
+		return err
+	}
+	if f.onAfterCommit != nil {
+		f.onAfterCommit()
+	}
+	return nil
+}
+
+func TestShipOrderDoesNotOverwriteRefundCancel(t *testing.T) {
+	ctx := t.Context()
+	stock := &fakeStock{reservationID: "res-ship-race"}
+	repo := memory.NewRepository()
+	svc := service.New(repo, stock).WithProduct(&fakeProduct{defaultCents: 5000})
+
+	order, err := svc.CreateOrder(ctx, service.CreateOrderInput{
+		CustomerID: "customer-1",
+		Items:      []domain.OrderItem{{SKU: "bag-1", Quantity: 1}},
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder returned error: %v", err)
+	}
+	if _, err := svc.MarkOrderPaid(ctx, order.ID, "pay-race", order.TotalCents); err != nil {
+		t.Fatalf("MarkOrderPaid returned error: %v", err)
+	}
+
+	raceStock := &refundDuringShipStock{
+		fakeStock: stock,
+		onAfterCommit: func() {
+			if err := svc.CancelOrderForRefund(ctx, order.ID, "pay-race", 0); err != nil {
+				t.Fatalf("CancelOrderForRefund during ship: %v", err)
+			}
+		},
+	}
+	svc = service.New(repo, raceStock).WithProduct(&fakeProduct{defaultCents: 5000})
+
+	_, err = svc.ShipOrder(ctx, order.ID, "manager-1", testShipTracking())
+	if !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("ShipOrder error = %v, want ErrInvalidTransition", err)
+	}
+	got, err := svc.GetOrder(ctx, order.ID)
+	if err != nil {
+		t.Fatalf("GetOrder: %v", err)
+	}
+	if got.Status != domain.StatusCanceled {
+		t.Fatalf("status = %q, want canceled (must not overwrite refund cancel)", got.Status)
+	}
+	if stock.committed != order.ReservationID {
+		t.Fatalf("committed = %q, want %q", stock.committed, order.ReservationID)
+	}
+}
+
 func TestShipOrderRejectsReleasedReservation(t *testing.T) {
 	ctx := t.Context()
 	stock := &fakeStock{reservationID: "res-123"}

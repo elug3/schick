@@ -448,6 +448,42 @@ func (r *Repository) SavePaidIfCanceled(ctx context.Context, order *domain.Order
 	return true, nil
 }
 
+func (r *Repository) ShipIfPaid(ctx context.Context, order *domain.Order, events []ports.OutboxEvent) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	existing, ok := r.orders[order.ID]
+	if !ok {
+		return false, nil
+	}
+	if existing.Status != domain.StatusPaid {
+		return false, nil
+	}
+
+	r.orders[order.ID] = cloneOrder(order)
+
+	for _, ev := range events {
+		r.nextOutboxID++
+		id := r.nextOutboxID
+		payload := append([]byte(nil), ev.Payload...)
+		r.outbox[id] = &outboxEntry{
+			msg: ports.OutboxMessage{
+				ID:          id,
+				AggregateID: ev.AggregateID,
+				Subject:     ev.Subject,
+				Payload:     payload,
+				CreatedAt:   order.UpdatedAt,
+			},
+		}
+	}
+
+	return true, nil
+}
+
 func (r *Repository) GetCheckoutSession(ctx context.Context, id string) (*domain.CheckoutSession, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

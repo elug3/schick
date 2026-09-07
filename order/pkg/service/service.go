@@ -388,7 +388,30 @@ func (s *Service) ShipOrder(ctx context.Context, orderID, shippedBy string, trac
 	if err := order.Ship(shippedBy, normalized, s.now()); err != nil {
 		return nil, err
 	}
-	return s.saveStatusChange(ctx, order)
+	events, err := s.outboxEvents(order, orderUpdatedSubject)
+	if err != nil {
+		return nil, err
+	}
+	ok, err := s.repo.ShipIfPaid(ctx, order, events)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		fresh, getErr := s.repo.Get(ctx, order.ID)
+		if getErr != nil {
+			return nil, fmt.Errorf("ship order %s: concurrent status change", order.ID)
+		}
+		if fresh.Status == domain.StatusInTransit {
+			return fresh, nil
+		}
+		log.Printf(
+			"ship order %s: stock committed but order is %s (reservation %s); needs ops review",
+			order.ID, fresh.Status, order.ReservationID,
+		)
+		return nil, domain.ErrInvalidTransition
+	}
+	s.tryDrainOutbox(ctx)
+	return cloneOrder(order), nil
 }
 
 func (s *Service) CancelOrder(ctx context.Context, id string) (*domain.Order, error) {
