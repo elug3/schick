@@ -710,6 +710,76 @@ func TestHandleNanoResult_Success(t *testing.T) {
 	}
 }
 
+func TestHandleNanoResult_UnsignedReturnMACSucceeds(t *testing.T) {
+	repo := memory.NewRepository()
+	orders := stubOrderClient{order: &ports.OrderSummary{
+		ID: "ord_1", CustomerID: "cust_1", Status: "pending", TotalCents: 70000,
+		RecipientName: "홍길동", RecipientPhone: "01012345678",
+	}}
+	nano := checkout.NewNanoProvider(checkout.NanoConfig{
+		Ver: "240000005", ShopCode: "240000005", LoginID: "shoptest", APIKey: "test-key", PublicBaseURL: "http://localhost:8080",
+	})
+	svc := service.New(repo, orders, nano, nil)
+	created, err := svc.CreatePayment(t.Context(), service.CreatePaymentInput{
+		OrderID: "ord_1", CustomerID: "cust_1", BearerToken: "token",
+	})
+	if err != nil {
+		t.Fatalf("CreatePayment: %v", err)
+	}
+	auth := nanoAuth("test-key")
+	ts := fmt.Sprintf("%d", time.Now().UTC().UnixMilli())
+	paid, err := svc.HandleNanoResult(t.Context(), auth, service.NanoResult{
+		ResultCode: "0000", ShopCode: "240000005", CompOrderNo: created.ID,
+		ReqPayAmt: "70000", TranNo: "tn_unsigned",
+		ReturnTS:  ts,
+		ReturnMAC: checkout.NanoReturnMAC(auth.Ver, auth.LoginID, auth.ShopCode, created.ID, "70000", ts, auth.APIKey),
+	})
+	if err != nil {
+		t.Fatalf("HandleNanoResult: %v", err)
+	}
+	if paid.Status != domain.StatusSucceeded {
+		t.Fatalf("status = %s", paid.Status)
+	}
+	if paid.ProviderRef != "tn_unsigned" {
+		t.Fatalf("provider_ref = %s", paid.ProviderRef)
+	}
+}
+
+func TestHandleNanoResult_ReturnMACDoesNotCrossPayments(t *testing.T) {
+	repo := memory.NewRepository()
+	orders := stubOrderClient{order: &ports.OrderSummary{
+		ID: "ord_1", CustomerID: "cust_1", Status: "pending", TotalCents: 70000,
+		RecipientName: "홍길동", RecipientPhone: "01012345678",
+	}}
+	nano := checkout.NewNanoProvider(checkout.NanoConfig{
+		Ver: "240000005", ShopCode: "240000005", LoginID: "shoptest", APIKey: "test-key", PublicBaseURL: "http://localhost:8080",
+	})
+	svc := service.New(repo, orders, nano, nil)
+	created, err := svc.CreatePayment(t.Context(), service.CreatePaymentInput{
+		OrderID: "ord_1", CustomerID: "cust_1", BearerToken: "token",
+	})
+	if err != nil {
+		t.Fatalf("CreatePayment: %v", err)
+	}
+	auth := nanoAuth("test-key")
+	ts := fmt.Sprintf("%d", time.Now().UTC().UnixMilli())
+	mac := checkout.NanoReturnMAC(auth.Ver, auth.LoginID, auth.ShopCode, "pay_other", "70000", ts, auth.APIKey)
+	_, err = svc.HandleNanoResult(t.Context(), auth, service.NanoResult{
+		ResultCode: "0000", ShopCode: "240000005", CompOrderNo: created.ID,
+		ReqPayAmt: "70000", ReturnTS: ts, ReturnMAC: mac,
+	})
+	if !errors.Is(err, domain.ErrInvalidPayment) {
+		t.Fatalf("err = %v, want ErrInvalidPayment", err)
+	}
+	got, err := svc.GetPayment(t.Context(), created.ID, "cust_1")
+	if err != nil {
+		t.Fatalf("GetPayment: %v", err)
+	}
+	if got.Status == domain.StatusSucceeded {
+		t.Fatal("MAC for another payment must not mark this one succeeded")
+	}
+}
+
 func TestHandleNanoResult_AmountMismatch(t *testing.T) {
 	repo := memory.NewRepository()
 	orders := stubOrderClient{order: &ports.OrderSummary{

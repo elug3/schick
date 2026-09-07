@@ -186,7 +186,7 @@ Order consumer: idempotent on `payment_id`; reject if `amount_cents != order.tot
   "expected_cents": 31004,
   "reported_amount": "31004",
   "tran_no": "260905001496",
-  "detail": "callback hashValue did not verify",
+  "detail": "callback hashValue / receiveUrl MAC did not verify",
   "occurred_at": "2026-09-05T11:30:00Z"
 }
 ```
@@ -213,11 +213,11 @@ Published when order transitions `pending` → `paid`. Notification formats ops 
 | `GET` | `/api/v1/payments/settings` | — | Non-secret service settings |
 | `POST` | `/api/v1/payments` | Bearer | Create payment (`credit_card` or `bypass`) |
 | `GET` | `/api/v1/payments/{id}` | Bearer | Payment status |
-| `GET` | `/api/v1/payments/{id}/nano/checkout` | — | Bridge into NANO cert checkout (when NANO configured). Server POSTs JSON + `API_KEY` to `request.io`. NANO 3xx is forwarded as an absolute Location; HTML is streamed only when the body is non-empty. Empty/unusable PG responses (and network errors) `303` to `NANO_FAILURE_URL` with `error=checkout_failed` — retry is safe because the card window never opened. The browser never POSTs to `request.io`. |
+| `GET` | `/api/v1/payments/{id}/nano/checkout` | — | Bridge into NANO cert checkout (when NANO configured). Server POSTs JSON + `API_KEY` to `request.io` (retries empty/5xx). NANO 3xx is forwarded as an absolute Location; HTML is streamed only when the body is non-empty. Empty/unusable PG responses after retries (and network errors) `303` to `NANO_FAILURE_URL` with `error=checkout_failed` — retry is safe because the card window never opened. The browser never POSTs to `request.io`. `receiveUrl` includes `nano_ts`/`nano_mac`. |
 | `POST` | `/api/v1/payments/nano/return` | — | NANO form `receiveUrl` callback → succeed/fail + redirect |
 | `POST` | `/api/v1/payments/webhooks/nano` | — | Optional JSON webhook (register URL with NANO) |
 
-NANO success callbacks (`resultCode=0000`) fail closed unless `shopcode` and `reqPayAmt` match the payment and `hashValue` verifies with `NANO_API_KEY` (request-style digest over callback `timestamp`; confirm against merchant return-hash docs).
+NANO success callbacks (`resultCode=0000`) fail closed unless `shopcode` and `reqPayAmt` match the payment **and** either `hashValue` verifies with `NANO_API_KEY` (when the PG sends one) **or** the `nano_ts`/`nano_mac` query on `receiveUrl` verifies. 인증결제 v2.7 does not sign the browser return, so checkout stamps that MAC on `receiveUrl` (payment-scoped; same amount on another payment will not verify).
 
 **Browser return never renders JSON** ([#232](https://github.com/elug3/dupli1/issues/232)). `POST /nano/return` is a form target the shopper's browser follows, so every outcome answers with a page:
 
@@ -233,7 +233,7 @@ The storefront reads `?error=` and suppresses the retry button for the reasons t
 
 A refused callback the PG had already approved also publishes `payment.callback_rejected` (see [Events](#events)) so ops hear about a probable charge with no paid order. `POST /webhooks/nano` is server-to-server and keeps its JSON status codes; it publishes the same alert.
 
-**Unresolved — card payments cannot succeed today.** The 인증결제 v2.7 guide documents no `hashValue` or `timestamp` on the *response*, only on the request, so the verification above rejects every genuine approval: **0 of 18** NANO payments have ever reached `succeeded`. Either NANO signs the return by an undocumented rule (needs their spec) or it is unsigned and approval must be confirmed out-of-band. Until NANO answers, verification stays on and failures are alerted rather than accepted. Full record, evidence, and the question to ask NANO: **[payment-nano-return-verification.md](payment-nano-return-verification.md)**.
+**Card approvals.** 인증결제 v2.7 does not put `hashValue`/`timestamp` on the *response*. Checkout binds `receiveUrl` with `nano_ts`/`nano_mac` (payment-scoped HMAC) so a genuine return can succeed without those fields. A callback that also carries a verifying `hashValue` is still accepted. Forged POSTs to `/nano/return` without that MAC are still refused. Record: **[payment-nano-return-verification.md](payment-nano-return-verification.md)**.
 
 **Create payment (credit card)**
 ```json

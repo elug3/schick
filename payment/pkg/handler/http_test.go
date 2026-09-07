@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -274,6 +275,37 @@ func TestNanoReturn_SucceedsAndRedirects(t *testing.T) {
 	}
 	if len(pub.events) != 1 {
 		t.Fatalf("events = %d", len(pub.events))
+	}
+}
+
+func TestNanoReturn_UnsignedV27QueryMACSucceeds(t *testing.T) {
+	cfg := nanoStorefrontConfig()
+	mux, _, pub, created := nanoTestStack(t, cfg)
+	nano := checkout.NewNanoProvider(cfg)
+	_, body, err := nano.BuildRequest(created.ID, created.OrderID, created.CustomerID,
+		created.PayerName, created.PayerPhone, "", "Dupli1 "+created.OrderID, created.AmountCents, false)
+	if err != nil {
+		t.Fatalf("BuildRequest: %v", err)
+	}
+	recv, err := url.Parse(body.ReceiveURL)
+	if err != nil {
+		t.Fatalf("parse receiveUrl: %v", err)
+	}
+	form := "resultCode=0000&shopcode=240000005&compOrderNo=" + created.ID +
+		"&reqPayAmt=1000&tranNo=tn_v27"
+	rec := postNanoForm(t, mux, recv.RequestURI(), form)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "checkout/confirmation") {
+		t.Fatalf("Location = %q, want success URL", loc)
+	}
+	if strings.Contains(loc, "error=") {
+		t.Fatalf("success redirect must not carry error: %s", loc)
+	}
+	if len(pub.events) != 1 {
+		t.Fatalf("events = %d, want payment.succeeded", len(pub.events))
 	}
 }
 
@@ -658,6 +690,30 @@ func TestNanoCheckout_EmptyUpstreamFailsClosed(t *testing.T) {
 
 	rec := getNanoCheckout(t, mux, created.ID)
 	assertNanoCheckoutFailed(t, rec)
+}
+
+func TestNanoCheckout_RetriesEmptyThenStreamsHTML(t *testing.T) {
+	const window = "<!DOCTYPE html><html><body>NANO PAY</body></html>"
+	var n atomic.Int32
+	mux, created, _ := nanoCheckoutAgainst(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) == 1 {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(window))
+	}))
+
+	rec := getNanoCheckout(t, mux, created.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != window {
+		t.Fatalf("body = %q, want streamed payment window after retry", rec.Body.String())
+	}
+	if n.Load() != 2 {
+		t.Fatalf("upstream POSTs = %d, want 2", n.Load())
+	}
 }
 
 func TestNanoCheckout_UnauthorizedFailsClosed(t *testing.T) {

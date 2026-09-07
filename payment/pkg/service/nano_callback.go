@@ -152,7 +152,7 @@ func nanoRejectDetail(reason NanoRejectReason) string {
 	case NanoRejectAmountMismatch:
 		return "approved amount disagrees with the amount on file"
 	case NanoRejectVerifyFailed:
-		return "callback hashValue did not verify"
+		return "callback hashValue / receiveUrl MAC did not verify"
 	case NanoRejectLookupFailed:
 		return "payment lookup failed"
 	case NanoRejectPersistFailed:

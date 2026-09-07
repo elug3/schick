@@ -265,33 +265,50 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 		h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 		return
 	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, reqURL, strings.NewReader(string(payload)))
-	if err != nil {
-		log.Printf("payment: nano checkout %s: build request: %v", payment.ID, err)
-		h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("CharSet", "UTF-8")
-	if ua := strings.TrimSpace(r.UserAgent()); ua != "" {
-		req.Header.Set("User-Agent", ua)
-	}
-	if cfg.APIKey != "" {
-		req.Header.Set("API_KEY", cfg.APIKey)
-	}
 
-	resp, err := nanoCheckoutHTTPClient(cfg.HTTPClient).Do(req)
-	if err != nil {
-		log.Printf("payment nano checkout request: %v", err)
-		h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
-		return
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if err != nil {
-		log.Printf("payment: nano checkout %s: read upstream: %v", payment.ID, err)
-		h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
-		return
+	client := nanoCheckoutHTTPClient(cfg.HTTPClient)
+	var resp *http.Response
+	var respBody []byte
+	for attempt := 1; attempt <= nanoCheckoutAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, reqURL, strings.NewReader(string(payload)))
+		if err != nil {
+			log.Printf("payment: nano checkout %s: build request: %v", payment.ID, err)
+			h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("CharSet", "UTF-8")
+		if ua := strings.TrimSpace(r.UserAgent()); ua != "" {
+			req.Header.Set("User-Agent", ua)
+		}
+		if cfg.APIKey != "" {
+			req.Header.Set("API_KEY", cfg.APIKey)
+		}
+
+		resp, err = client.Do(req)
+		if err != nil {
+			log.Printf("payment nano checkout request (attempt %d/%d): %v", attempt, nanoCheckoutAttempts, err)
+			if attempt < nanoCheckoutAttempts {
+				time.Sleep(nanoCheckoutRetryWait)
+				continue
+			}
+			h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
+			return
+		}
+		respBody, err = io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		_ = resp.Body.Close()
+		if err != nil {
+			log.Printf("payment: nano checkout %s: read upstream: %v", payment.ID, err)
+			h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
+			return
+		}
+		if shouldRetryNanoCheckout(resp, respBody) && attempt < nanoCheckoutAttempts {
+			log.Printf("payment: nano checkout %s: retrying empty/error upstream (attempt %d/%d status=%d)",
+				payment.ID, attempt, nanoCheckoutAttempts, resp.StatusCode)
+			time.Sleep(nanoCheckoutRetryWait)
+			continue
+		}
+		break
 	}
 
 	if loc := nanoRedirectLocation(resp); loc != "" {
@@ -346,6 +363,26 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(respBody)
+}
+
+const (
+	nanoCheckoutAttempts  = 3
+	nanoCheckoutRetryWait = 250 * time.Millisecond
+)
+
+// shouldRetryNanoCheckout is true for the empty/5xx PG blips that produced the
+// blank checkout page. Do not retry a real window, a 3xx, or a 4xx rejection.
+func shouldRetryNanoCheckout(resp *http.Response, body []byte) bool {
+	if resp == nil {
+		return true
+	}
+	if nanoRedirectLocation(resp) != "" {
+		return false
+	}
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+		return true
+	}
+	return resp.StatusCode >= 200 && resp.StatusCode < 300 && len(bytes.TrimSpace(body)) == 0
 }
 
 // nanoCheckoutHTTPClient POSTs to NANO without following redirects. The default
@@ -432,6 +469,9 @@ func (h *Handler) nanoReturn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result.Source = service.NanoSourceReturn
+	q := r.URL.Query()
+	result.ReturnTS = strings.TrimSpace(q.Get("nano_ts"))
+	result.ReturnMAC = strings.TrimSpace(q.Get("nano_mac"))
 	payment, err := h.svc.HandleNanoResult(r.Context(), nanoCallbackAuth(cfg), result)
 	if err != nil {
 		orderID, paymentID := nanoReturnIDs(result, err)

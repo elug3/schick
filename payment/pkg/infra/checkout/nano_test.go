@@ -1,8 +1,11 @@
 package checkout
 
 import (
+	"fmt"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elug3/dupli1/payment/pkg/domain"
 	"github.com/elug3/dupli1/payment/pkg/ports"
@@ -41,6 +44,32 @@ func TestVerifyNanoCallbackHash(t *testing.T) {
 	}
 	if VerifyNanoCallbackHash(NanoConfig{}, cfg.ShopCode, "70000", ts, hash) {
 		t.Fatal("disabled credentials must fail closed")
+	}
+}
+
+func TestVerifyNanoReturnMAC(t *testing.T) {
+	cfg := NanoConfig{
+		Ver: "240000005", ShopCode: "240000005", LoginID: "shoptest", APIKey: "test-key",
+	}
+	now := time.Date(2026, 9, 7, 3, 0, 0, 0, time.UTC)
+	ts := fmt.Sprintf("%d", now.UnixMilli())
+	mac := NanoReturnMAC(cfg.Ver, cfg.LoginID, cfg.ShopCode, "pay_1", "70000", ts, cfg.APIKey)
+	if !VerifyNanoReturnMAC(cfg, "pay_1", cfg.ShopCode, "70000", ts, mac, now) {
+		t.Fatal("expected valid receiveUrl MAC")
+	}
+	if VerifyNanoReturnMAC(cfg, "pay_2", cfg.ShopCode, "70000", ts, mac, now) {
+		t.Fatal("MAC for another payment must fail")
+	}
+	if VerifyNanoReturnMAC(cfg, "pay_1", cfg.ShopCode, "70000", ts, "00"+mac[2:], now) {
+		t.Fatal("tampered MAC must fail")
+	}
+	old := fmt.Sprintf("%d", now.Add(-21*time.Minute).UnixMilli())
+	oldMAC := NanoReturnMAC(cfg.Ver, cfg.LoginID, cfg.ShopCode, "pay_1", "70000", old, cfg.APIKey)
+	if VerifyNanoReturnMAC(cfg, "pay_1", cfg.ShopCode, "70000", old, oldMAC, now) {
+		t.Fatal("expired MAC must fail")
+	}
+	if VerifyNanoReturnMAC(cfg, "pay_1", cfg.ShopCode, "70000", "", mac, now) {
+		t.Fatal("missing timestamp must fail")
 	}
 }
 
@@ -88,18 +117,31 @@ func TestBuildRequest(t *testing.T) {
 		BaseURL: "https://dev3.nanopay.co.kr", Ver: "240000005", ShopCode: "240000005",
 		LoginID: "shoptest", APIKey: "secret", PublicBaseURL: "https://dupli1.com",
 	})
-	url, body, err := p.BuildRequest("pay_1", "ord_1", "cust_1", "홍길동", "01012345678", "a@b.c", "가방", 1004, false)
+	reqURL, body, err := p.BuildRequest("pay_1", "ord_1", "cust_1", "홍길동", "01012345678", "a@b.c", "가방", 1004, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(url, nanoPCRequestPath) {
-		t.Fatalf("url = %s", url)
+	if !strings.HasSuffix(reqURL, nanoPCRequestPath) {
+		t.Fatalf("url = %s", reqURL)
 	}
 	if body.PayWay != "card" || body.ReqPayAmt != "1004" || body.CompOrderNo != "pay_1" {
 		t.Fatalf("body = %+v", body)
 	}
-	if body.ReceiveURL != "https://dupli1.com/api/v1/payments/nano/return" {
+	if !strings.HasPrefix(body.ReceiveURL, "https://dupli1.com/api/v1/payments/nano/return?") {
 		t.Fatalf("receiveUrl = %s", body.ReceiveURL)
+	}
+	u, err := url.Parse(body.ReceiveURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := u.Query().Get("nano_ts")
+	mac := u.Query().Get("nano_mac")
+	if ts != body.Timestamp {
+		t.Fatalf("nano_ts = %q, want request timestamp %q", ts, body.Timestamp)
+	}
+	wantMAC := NanoReturnMAC(body.Ver, body.LoginID, body.ShopCode, body.CompOrderNo, body.ReqPayAmt, ts, "secret")
+	if mac != wantMAC {
+		t.Fatalf("nano_mac mismatch")
 	}
 	wantHash := NanoHash(body.Ver, body.LoginID, body.ShopCode, body.ReqPayAmt, body.Timestamp, "secret")
 	if body.HashValue != wantHash {
