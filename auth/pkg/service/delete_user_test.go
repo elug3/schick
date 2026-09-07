@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -78,6 +79,50 @@ type failingPublisher struct{}
 
 func (failingPublisher) Publish(context.Context, string, any) error {
 	return errors.New("broker down")
+}
+
+type outboxDeleteRepo struct {
+	deleteUserRepo
+	enqueuedSubject string
+	enqueuedPayload []byte
+}
+
+func (r *outboxDeleteRepo) DeleteAndEnqueue(_ context.Context, userID, subject string, payload []byte) error {
+	if r.user == nil || r.user.ID != userID {
+		return autherrors.ErrUserNotFound
+	}
+	r.enqueuedSubject = subject
+	r.enqueuedPayload = append([]byte(nil), payload...)
+	return r.Delete(context.Background(), userID)
+}
+
+// Postgres deletes enqueue user.deleted in the same transaction as the row
+// removal; the service must not publish first in that mode.
+func TestDeleteUser_UsesTransactionalOutboxWhenAvailable(t *testing.T) {
+	user, _ := domain.NewUser("u-outbox", "outbox@example.com", "password12", domain.AccountTypeCustomer)
+	repo := &outboxDeleteRepo{deleteUserRepo: deleteUserRepo{user: user}}
+	pub := &recordingPublisher{}
+	svc := NewService(repo, fakeTokenGenerator{}, WithEventPublisher(pub))
+
+	if err := svc.DeleteUser(context.Background(), "u-outbox"); err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+	if repo.deleted != "u-outbox" {
+		t.Fatalf("deleted = %q, want u-outbox", repo.deleted)
+	}
+	if pub.subject != "" {
+		t.Fatal("must not publish directly when transactional outbox is available")
+	}
+	if repo.enqueuedSubject != events.UserDeleted {
+		t.Fatalf("enqueued subject = %q, want %q", repo.enqueuedSubject, events.UserDeleted)
+	}
+	var ev events.UserDeletedEvent
+	if err := json.Unmarshal(repo.enqueuedPayload, &ev); err != nil {
+		t.Fatalf("unmarshal enqueued payload: %v", err)
+	}
+	if ev.UserID != "u-outbox" || ev.EventType != events.UserDeleted {
+		t.Fatalf("enqueued event = %+v", ev)
+	}
 }
 
 func TestDeleteUser_FailsWhenPublishFails(t *testing.T) {
