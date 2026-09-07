@@ -101,6 +101,7 @@ func (h *Handler) payments(w http.ResponseWriter, r *http.Request) {
 	payment, err := h.svc.CreatePayment(r.Context(), service.CreatePaymentInput{
 		OrderID:           req.OrderID,
 		CustomerID:        claims.UserID,
+		PayerEmail:        claims.Email,
 		BearerToken:       bearerToken,
 		IdempotencyKey:    r.Header.Get("Idempotency-Key"),
 		Method:            req.Method,
@@ -249,7 +250,7 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 
 	mobile := checkout.IsMobileUserAgent(r.UserAgent())
 	reqURL, body, err := h.nano.BuildRequest(
-		payment.ID, payment.OrderID, payment.CustomerID,
+		payment.ID, payment.OrderID,
 		payment.PayerName, payment.PayerPhone, payment.PayerEmail,
 		"Dupli1 "+payment.OrderID, payment.AmountCents, mobile,
 	)

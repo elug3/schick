@@ -29,7 +29,7 @@ const (
 	nanoMobileRequestPath = "/api/payment/cert/mobile/request.io"
 	nanoCancelPath        = "/api/payment/cancel.io"
 	// nanoCompOrderMemMaxLen is the 인증결제 request limit NANO quoted for
-	// compOrderMem (가맹점 회원 ID). Auth user ids are 36-char UUIDs.
+	// compOrderMem (가맹점 회원 ID). We send the customer email, truncated.
 	nanoCompOrderMemMaxLen = 30
 )
 
@@ -160,7 +160,7 @@ type NanoRequest struct {
 }
 
 // BuildRequest builds a signed NANO cert payment request for the given payment snapshot.
-func (p *NanoProvider) BuildRequest(paymentID, orderID, customerID, orderName, orderTel, orderEmail, goodsName string, amountCents int64, mobile bool) (requestURL string, body NanoRequest, err error) {
+func (p *NanoProvider) BuildRequest(paymentID, orderID, orderName, orderTel, orderEmail, goodsName string, amountCents int64, mobile bool) (requestURL string, body NanoRequest, err error) {
 	if !p.cfg.Enabled() {
 		return "", NanoRequest{}, fmt.Errorf("nano credentials not configured")
 	}
@@ -201,7 +201,7 @@ func (p *NanoProvider) BuildRequest(paymentID, orderID, customerID, orderName, o
 		ReqPayAmt:    amt,
 		ReceiveURL:   encodeNanoReceiveURL(p.cfg.publicBase(), q.Encode()),
 		CompOrderNo:  paymentID,
-		CompOrderMem: clampNanoCompOrderMem(customerID),
+		CompOrderMem: clampNanoCompOrderMem(orderEmail),
 		Timestamp:    ts,
 		HashValue:    hash,
 	}
@@ -306,8 +306,8 @@ func nanoTimestamp(now time.Time) string {
 }
 
 // clampNanoCompOrderMem trims and caps the merchant member id at the 30-byte
-// VARCHAR NANO documented for the request. Prefix-preserving so ops can still
-// grep a UUID in the NANO console against auth user ids.
+// VARCHAR NANO documented for the request. We send the customer email (not the
+// 36-char auth UUID). Longer addresses are prefix-truncated.
 func clampNanoCompOrderMem(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) <= nanoCompOrderMemMaxLen {

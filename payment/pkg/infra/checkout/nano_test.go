@@ -119,7 +119,7 @@ func TestBuildRequest(t *testing.T) {
 		BaseURL: "https://dev3.nanopay.co.kr", Ver: "240000005", ShopCode: "240000005",
 		LoginID: "shoptest", APIKey: "secret", PublicBaseURL: "https://dupli1.com",
 	})
-	reqURL, body, err := p.BuildRequest("pay_1", "ord_1", "cust_1", "홍길동", "01012345678", "a@b.c", "가방", 1004, false)
+	reqURL, body, err := p.BuildRequest("pay_1", "ord_1", "홍길동", "01012345678", "a@b.c", "가방", 1004, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,8 +129,8 @@ func TestBuildRequest(t *testing.T) {
 	if body.PayWay != "card" || body.ReqPayAmt != "1004" || body.CompOrderNo != "pay_1" {
 		t.Fatalf("body = %+v", body)
 	}
-	if body.CompOrderMem != "cust_1" {
-		t.Fatalf("compOrderMem = %q", body.CompOrderMem)
+	if body.CompOrderMem != "a@b.c" {
+		t.Fatalf("compOrderMem = %q, want customer email", body.CompOrderMem)
 	}
 	rawRecv, err := url.QueryUnescape(body.ReceiveURL)
 	if err != nil {
@@ -159,7 +159,7 @@ func TestBuildRequest(t *testing.T) {
 	if body.HashValue != wantHash {
 		t.Fatalf("hash mismatch")
 	}
-	_, bodyM, err := p.BuildRequest("pay_1", "ord_1", "cust_1", "홍길동", "01012345678", "", "가방", 1004, true)
+	_, bodyM, err := p.BuildRequest("pay_1", "ord_1", "홍길동", "01012345678", "", "가방", 1004, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,16 +187,16 @@ func TestClampNanoCompOrderMem(t *testing.T) {
 	if got := clampNanoCompOrderMem("  cust_1  "); got != "cust_1" {
 		t.Fatalf("short id = %q", got)
 	}
-	uuid := "a1b2c3d4-e5f6-4789-abcd-ef1234567890"
-	if len(uuid) != 36 {
-		t.Fatalf("fixture uuid len = %d, want 36", len(uuid))
+	email := "very.long.customer.email@dupli1.com"
+	if len(email) <= nanoCompOrderMemMaxLen {
+		t.Fatalf("fixture email len = %d, want > %d", len(email), nanoCompOrderMemMaxLen)
 	}
-	got := clampNanoCompOrderMem(uuid)
+	got := clampNanoCompOrderMem(email)
 	if len(got) != nanoCompOrderMemMaxLen {
 		t.Fatalf("clamped len = %d, want %d (%q)", len(got), nanoCompOrderMemMaxLen, got)
 	}
-	if got != uuid[:nanoCompOrderMemMaxLen] {
-		t.Fatalf("clamped = %q, want prefix of uuid", got)
+	if got != email[:nanoCompOrderMemMaxLen] {
+		t.Fatalf("clamped = %q, want prefix of email", got)
 	}
 }
 
@@ -205,10 +205,13 @@ func TestBuildRequest_CompOrderMemMaxLenAndEncodedReceiveURL(t *testing.T) {
 		BaseURL: "https://dev3.nanopay.co.kr", Ver: "240000005", ShopCode: "240000005",
 		LoginID: "shoptest", APIKey: "secret", PublicBaseURL: "https://dupli1.com",
 	})
-	uuid := "a1b2c3d4-e5f6-4789-abcd-ef1234567890"
-	_, body, err := p.BuildRequest("pay_1", "ord_1", uuid, "홍길동", "01012345678", "", "가방", 1004, false)
+	email := "very.long.customer.email@dupli1.com"
+	_, body, err := p.BuildRequest("pay_1", "ord_1", "홍길동", "01012345678", email, "가방", 1004, false)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if body.CompOrderMem != email[:nanoCompOrderMemMaxLen] {
+		t.Fatalf("compOrderMem = %q, want truncated email", body.CompOrderMem)
 	}
 	if len(body.CompOrderMem) != nanoCompOrderMemMaxLen {
 		t.Fatalf("compOrderMem len = %d (%q), want %d", len(body.CompOrderMem), body.CompOrderMem, nanoCompOrderMemMaxLen)

@@ -126,7 +126,7 @@ func newStack(t *testing.T) *stack {
 	if err := repo.Save(t.Context(), registrar); err != nil {
 		t.Fatalf("Save registrar: %v", err)
 	}
-	registrarToken, err := accessGen.Generate(t.Context(), registrar.ID, registrar.Permissions)
+	registrarToken, err := accessGen.Generate(t.Context(), registrar.ID, registrar.Permissions, registrar.Email)
 	if err != nil {
 		t.Fatalf("Generate registrar token: %v", err)
 	}
@@ -729,7 +729,7 @@ func (s *stack) userDeleteToken(t *testing.T) string {
 	if err := s.repo.Save(t.Context(), admin); err != nil {
 		t.Fatalf("Save admin: %v", err)
 	}
-	token, err := s.accessTokenGen.Generate(t.Context(), admin.ID, admin.Permissions)
+	token, err := s.accessTokenGen.Generate(t.Context(), admin.ID, admin.Permissions, admin.Email)
 	if err != nil {
 		t.Fatalf("Generate admin token: %v", err)
 	}
@@ -800,7 +800,7 @@ func TestDeleteUser(t *testing.T) {
 		if err := s.repo.Save(t.Context(), admin); err != nil {
 			t.Fatal(err)
 		}
-		token, err := s.accessTokenGen.Generate(t.Context(), admin.ID, admin.Permissions)
+		token, err := s.accessTokenGen.Generate(t.Context(), admin.ID, admin.Permissions, admin.Email)
 		if err != nil {
 			t.Fatal(err)
 		}

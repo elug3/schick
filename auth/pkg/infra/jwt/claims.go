@@ -3,13 +3,14 @@ package jwt
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"strings"
 	"time"
 
 	"github.com/elug3/dupli1/shared/pkg/permissions"
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func buildMapClaims(userID string, tokenType string, expiry time.Time, userPermissions []string) jwt.MapClaims {
+func buildMapClaims(userID string, tokenType string, expiry time.Time, userPermissions []string, email string) jwt.MapClaims {
 	claims := jwt.MapClaims{
 		"sub": userID,
 		"exp": expiry.Unix(),
@@ -27,6 +28,9 @@ func buildMapClaims(userID string, tokenType string, expiry time.Time, userPermi
 	}
 	if tokenType != "refresh" {
 		claims["permissions"] = permissions.Dedupe(userPermissions)
+		if e := strings.TrimSpace(email); e != "" {
+			claims["email"] = e
+		}
 	}
 	return claims
 }

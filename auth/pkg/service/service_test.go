@@ -43,7 +43,7 @@ func (r *fakeUserRepository) ListAll(ctx context.Context) ([]*domain.User, error
 
 type fakeTokenGenerator struct{}
 
-func (g fakeTokenGenerator) Generate(ctx context.Context, userID string, userPermissions []string) (string, error) {
+func (g fakeTokenGenerator) Generate(ctx context.Context, userID string, userPermissions []string, email string) (string, error) {
 	return "token", nil
 }
 
@@ -56,7 +56,7 @@ type capturingTokenGenerator struct {
 	capturedPermissions []string
 }
 
-func (g *capturingTokenGenerator) Generate(ctx context.Context, userID string, userPermissions []string) (string, error) {
+func (g *capturingTokenGenerator) Generate(ctx context.Context, userID string, userPermissions []string, email string) (string, error) {
 	g.capturedUserID = userID
 	g.capturedPermissions = append([]string(nil), userPermissions...)
 	return "token", nil
@@ -621,7 +621,7 @@ func TestRefresh_ConcurrentRefreshOnlyOneSucceeds(t *testing.T) {
 // a distinct session-store key.
 type sequentialTokenGenerator struct{}
 
-func (sequentialTokenGenerator) Generate(_ context.Context, userID string, _ []string) (string, error) {
+func (sequentialTokenGenerator) Generate(_ context.Context, userID string, _ []string, _ string) (string, error) {
 	return userID + "-" + newID(), nil
 }
 

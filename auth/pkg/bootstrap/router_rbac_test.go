@@ -78,7 +78,7 @@ func TestOwnerCanRegisterAndListUsers(t *testing.T) {
 		t.Fatalf("Save owner: %v", err)
 	}
 
-	accessToken, err := accessGen.Generate(t.Context(), owner.ID, owner.Permissions)
+	accessToken, err := accessGen.Generate(t.Context(), owner.ID, owner.Permissions, owner.Email)
 	if err != nil {
 		t.Fatalf("Generate token: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestCustomerRegistrarCanRegisterButNotManageUsers(t *testing.T) {
 		t.Fatalf("Save registrar: %v", err)
 	}
 
-	accessToken, err := accessGen.Generate(t.Context(), registrar.ID, registrar.Permissions)
+	accessToken, err := accessGen.Generate(t.Context(), registrar.ID, registrar.Permissions, registrar.Email)
 	if err != nil {
 		t.Fatalf("Generate token: %v", err)
 	}

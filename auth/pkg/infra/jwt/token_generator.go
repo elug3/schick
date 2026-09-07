@@ -32,10 +32,10 @@ func NewTokenGeneratorWithType(secret string, expirySeconds int64, tokenType str
 	}
 }
 
-// Generate generates a JWT token. Access tokens include permissions;
-// refresh tokens include only sub, type, exp, and iat.
-func (tg *TokenGenerator) Generate(ctx context.Context, userID string, userPermissions []string) (string, error) {
-	claims := buildMapClaims(userID, tg.tokenType, time.Now().Add(tg.expiryDuration), userPermissions)
+// Generate generates a JWT token. Access tokens include permissions and email
+// (when non-empty); refresh tokens include only sub, type, exp, iat, and jti.
+func (tg *TokenGenerator) Generate(ctx context.Context, userID string, userPermissions []string, email string) (string, error) {
+	claims := buildMapClaims(userID, tg.tokenType, time.Now().Add(tg.expiryDuration), userPermissions, email)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString([]byte(tg.secret))
