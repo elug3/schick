@@ -645,8 +645,10 @@ func nanoCheckoutAgainst(t *testing.T, upstream http.Handler) (*http.ServeMux, *
 }
 
 // Production GET .../nano/checkout returned 200 text/html with a 0-byte body.
-// An empty 2xx from NANO must not be copied to the shopper.
-func TestNanoCheckout_EmptyUpstreamServesLauncherNotBlankPage(t *testing.T) {
+// That was a temporary NANO PG error. An empty 2xx must not be copied to the
+// shopper, and must not launch checkout from the browser (JSON + API_KEY stay
+// server-side). Send them back so they can retry.
+func TestNanoCheckout_EmptyUpstreamFailsClosed(t *testing.T) {
 	mux, created, _ := nanoCheckoutAgainst(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", r.Method)
@@ -655,19 +657,16 @@ func TestNanoCheckout_EmptyUpstreamServesLauncherNotBlankPage(t *testing.T) {
 	}))
 
 	rec := getNanoCheckout(t, mux, created.ID)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
-	}
-	body := rec.Body.String()
-	if strings.TrimSpace(body) == "" {
-		t.Fatal("bridge streamed a blank page")
-	}
-	if !strings.Contains(body, "나노페이 결제창으로 이동 중입니다") {
-		t.Fatalf("want launcher HTML, got %s", body)
-	}
-	if strings.Contains(rec.Header().Get("Content-Type"), "application/json") {
-		t.Fatalf("shopper received JSON: %s", body)
-	}
+	assertNanoCheckoutFailed(t, rec)
+}
+
+func TestNanoCheckout_UnauthorizedFailsClosed(t *testing.T) {
+	mux, created, _ := nanoCheckoutAgainst(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+
+	rec := getNanoCheckout(t, mux, created.ID)
+	assertNanoCheckoutFailed(t, rec)
 }
 
 // Following a 302 server-side (default http.Client) lands on a cookie-less empty
@@ -718,17 +717,29 @@ func TestNanoCheckout_PayUrlJSONRedirects(t *testing.T) {
 	}
 }
 
-func TestNanoCheckout_JSONSuccessWithoutURLUsesLauncher(t *testing.T) {
+func TestNanoCheckout_JSONSuccessWithoutURLFailsClosed(t *testing.T) {
 	mux, created, _ := nanoCheckoutAgainst(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"resultCode":"0000"}`))
 	}))
 
 	rec := getNanoCheckout(t, mux, created.ID)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	assertNanoCheckoutFailed(t, rec)
+}
+
+func assertNanoCheckoutFailed(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if ct := rec.Header().Get("Content-Type"); strings.Contains(ct, "application/json") {
+		t.Fatalf("shopper received JSON (%s): %s", ct, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "나노페이 결제창으로 이동 중입니다") {
-		t.Fatalf("want launcher, got %s", rec.Body.String())
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303; body: %s", rec.Code, rec.Body.String())
+	}
+	got, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse Location: %v", err)
+	}
+	if reason := got.Query().Get("error"); reason != "checkout_failed" {
+		t.Fatalf("error = %q, want checkout_failed; Location = %s", reason, rec.Header().Get("Location"))
 	}
 }

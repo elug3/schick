@@ -209,7 +209,9 @@ func (h *Handler) cancelPayment(w http.ResponseWriter, r *http.Request, paymentI
 }
 
 // nanoCheckout bridges the browser into NANO certified checkout (PC or mobile).
-// It POSTs a freshly signed request server-side and streams HTML / redirects.
+// It POSTs a freshly signed request server-side (JSON + API_KEY, per 인증결제
+// v2.7) and streams HTML / redirects. The shopper's browser never POSTs to
+// NANO's request.io — that would drop the API_KEY and contradict the guide.
 //
 // It is navigated to directly by the shopper (it is the checkout_url handed to
 // the storefront), so like nanoReturn it must answer with a page rather than a
@@ -219,11 +221,9 @@ func (h *Handler) cancelPayment(w http.ResponseWriter, r *http.Request, paymentI
 // yet, so nothing has been charged. That is why the bridge always uses
 // nanoReturnCheckoutFailed and never an unconfirmed reason.
 //
-// Production fingerprint of the blank-page bug: GET .../nano/checkout returned
-// HTTP 200, Content-Type text/html; charset=utf-8, and a 0-byte body. That is
-// this handler copying an empty 2xx from NANO (or the page reached after the
-// default HTTP client followed a 302 without NANO's cookies). Never stream an
-// empty body; fall back to the browser launcher instead.
+// An empty 2xx from NANO is a PG-side blip, not something to paper over by
+// launching checkout from the browser. Never stream an empty body; send the
+// shopper back to the storefront so they can pay again.
 func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID string) {
 	if h.nano == nil {
 		respondError(w, http.StatusNotFound, "not found")
@@ -283,7 +283,7 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 	resp, err := nanoCheckoutHTTPClient(cfg.HTTPClient).Do(req)
 	if err != nil {
 		log.Printf("payment nano checkout request: %v", err)
-		h.writeNanoLauncher(w, reqURL, body)
+		h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 		return
 	}
 	defer resp.Body.Close()
@@ -321,25 +321,20 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 			}
 			// resultCode 0000 (or no code) without a pay URL is not a payment
 			// window — do not dump the JSON as the page.
-			log.Printf("payment: nano checkout %s: JSON with no pay URL (resultCode=%v); using browser launcher",
+			log.Printf("payment: nano checkout %s: JSON with no pay URL (resultCode=%v)",
 				payment.ID, parsed["resultCode"])
-			h.writeNanoLauncher(w, reqURL, body)
+			h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 			return
 		}
 	}
-	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
-		// Upstream IP allowlist — fall back to browser-side launch (CORS * on NANO).
-		h.writeNanoLauncher(w, reqURL, body)
-		return
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		log.Printf("payment nano checkout: status=%d body=%s", resp.StatusCode, truncateForLog(string(respBody), 200))
-		h.writeNanoLauncher(w, reqURL, body)
+		h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 		return
 	}
 	if len(bytes.TrimSpace(respBody)) == 0 {
-		log.Printf("payment: nano checkout %s: empty %d from NANO; using browser launcher", payment.ID, resp.StatusCode)
-		h.writeNanoLauncher(w, reqURL, body)
+		log.Printf("payment: nano checkout %s: empty %d from NANO", payment.ID, resp.StatusCode)
+		h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 		return
 	}
 
@@ -392,64 +387,6 @@ func nanoRedirectLocation(resp *http.Response) string {
 		return resp.Request.URL.ResolveReference(ref).String()
 	}
 	return loc
-}
-
-// writeNanoLauncher serves an HTML page that POSTs the signed JSON from the browser.
-// Used when the payment service host is not yet allowlisted by NANO, or when the
-// server-side POST returned an empty/unusable body (a blank page to the shopper).
-func (h *Handler) writeNanoLauncher(w http.ResponseWriter, reqURL string, body checkout.NanoRequest) {
-	payload, err := json.Marshal(body)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
-<html lang="ko"><head><meta charset="utf-8"><title>결제 연결 중…</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>body{font-family:system-ui,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;background:#f7f7f5;color:#222}
-.box{text-align:center;padding:2rem} .err{color:#b00020;margin-top:1rem;white-space:pre-wrap}</style>
-</head><body><div class="box"><p>나노페이 결제창으로 이동 중입니다…</p><p class="err" id="err" hidden></p></div>
-<script>
-(async function(){
-  const url = %s;
-  const body = %s;
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {"Content-Type": "application/json", "CharSet": "UTF-8"},
-      body: JSON.stringify(body),
-      credentials: "omit",
-      redirect: "follow"
-    });
-    const ct = res.headers.get("content-type") || "";
-    if (ct.includes("application/json")) {
-      const j = await res.json();
-      const next = j.payUrl || j.pay_url || j.redirectUrl || j.redirect_url || j.checkoutUrl || j.checkout_url || j.paymentUrl || j.payment_url;
-      if (next) { location.href = next; return; }
-      if (j.resultCode && j.resultCode !== "0000") {
-        throw new Error(j.resultMsg || ("결제 요청 실패: " + j.resultCode));
-      }
-      throw new Error("결제창 URL이 없습니다");
-    }
-    const html = await res.text();
-    if (!html.trim()) {
-      throw new Error("결제창 응답이 비어 있습니다");
-    }
-    document.open(); document.write(html); document.close();
-  } catch (e) {
-    const el = document.getElementById("err");
-    el.hidden = false;
-    el.textContent = "결제창을 열 수 없습니다. " + (e && e.message ? e.message : e);
-  }
-})();
-</script></body></html>`, jsonString(reqURL), string(payload))
-}
-
-func jsonString(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
 }
 
 // Reasons attached to the storefront failure redirect as ?error=.

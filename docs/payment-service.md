@@ -213,7 +213,7 @@ Published when order transitions `pending` → `paid`. Notification formats ops 
 | `GET` | `/api/v1/payments/settings` | — | Non-secret service settings |
 | `POST` | `/api/v1/payments` | Bearer | Create payment (`credit_card` or `bypass`) |
 | `GET` | `/api/v1/payments/{id}` | Bearer | Payment status |
-| `GET` | `/api/v1/payments/{id}/nano/checkout` | — | Bridge into NANO cert checkout (when NANO configured). Never a blank page: NANO 3xx is forwarded, HTML is streamed only when the body is non-empty, and an empty/unusable PG response falls back to the browser launcher. |
+| `GET` | `/api/v1/payments/{id}/nano/checkout` | — | Bridge into NANO cert checkout (when NANO configured). Server POSTs JSON + `API_KEY` to `request.io`. NANO 3xx is forwarded as an absolute Location; HTML is streamed only when the body is non-empty. Empty/unusable PG responses (and network errors) `303` to `NANO_FAILURE_URL` with `error=checkout_failed` — retry is safe because the card window never opened. The browser never POSTs to `request.io`. |
 | `POST` | `/api/v1/payments/nano/return` | — | NANO form `receiveUrl` callback → succeed/fail + redirect |
 | `POST` | `/api/v1/payments/webhooks/nano` | — | Optional JSON webhook (register URL with NANO) |
 
