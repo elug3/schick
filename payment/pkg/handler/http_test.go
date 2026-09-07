@@ -287,7 +287,11 @@ func TestNanoReturn_UnsignedV27QueryMACSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildRequest: %v", err)
 	}
-	recv, err := url.Parse(body.ReceiveURL)
+	rawRecv, err := url.QueryUnescape(body.ReceiveURL)
+	if err != nil {
+		t.Fatalf("unescape receiveUrl: %v", err)
+	}
+	recv, err := url.Parse(rawRecv)
 	if err != nil {
 		t.Fatalf("parse receiveUrl: %v", err)
 	}

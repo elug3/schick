@@ -12,7 +12,9 @@ The v2.7 response field list has no `hashValue` or `timestamp`. Requiring those
 on the callback refused every genuine approval (**0 of 18** NANO payments ever
 reached `succeeded`). Checkout now sets
 
-`receiveUrl = …/nano/return?nano_ts=…&nano_mac=…`
+`receiveUrl = url.QueryEscape(…/nano/return?nano_ts=…&nano_mac=…)`
+
+The value is percent-encoded in the JSON request so NANO's parser does not split on the raw `?`/`&` of those query params. NANO POSTs to the decoded URL. `compOrderMem` is the customer id truncated to 30 bytes (NANO's request field length; auth ids are 36-char UUIDs).
 
 where `nano_mac` is `SHA256(ver+loginId+shopcode+compOrderNo+reqPayAmt+timestamp+API_KEY+"RETURN")`.
 A `resultCode=0000` return is accepted if that MAC verifies **or** a PG-supplied

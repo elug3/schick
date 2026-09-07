@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elug3/dupli1/payment/pkg/domain"
 	"github.com/elug3/dupli1/payment/pkg/ports"
@@ -27,6 +28,9 @@ const (
 	nanoPCRequestPath     = "/api/payment/cert/pc/request.io"
 	nanoMobileRequestPath = "/api/payment/cert/mobile/request.io"
 	nanoCancelPath        = "/api/payment/cancel.io"
+	// nanoCompOrderMemMaxLen is the 인증결제 request limit NANO quoted for
+	// compOrderMem (가맹점 회원 ID). Auth user ids are 36-char UUIDs.
+	nanoCompOrderMemMaxLen = 30
 )
 
 // NanoConfig holds NANO Solution certified-payment (인증결제) credentials.
@@ -195,9 +199,9 @@ func (p *NanoProvider) BuildRequest(paymentID, orderID, customerID, orderName, o
 		PayWay:       nanoPayWayCard,
 		GoodsName:    goodsName,
 		ReqPayAmt:    amt,
-		ReceiveURL:   p.cfg.publicBase() + "/api/v1/payments/nano/return?" + q.Encode(),
+		ReceiveURL:   encodeNanoReceiveURL(p.cfg.publicBase(), q.Encode()),
 		CompOrderNo:  paymentID,
-		CompOrderMem: customerID,
+		CompOrderMem: clampNanoCompOrderMem(customerID),
 		Timestamp:    ts,
 		HashValue:    hash,
 	}
@@ -299,6 +303,29 @@ func nanoTimestampFresh(ts string, now time.Time) bool {
 func nanoTimestamp(now time.Time) string {
 	// Docs: unix seconds (UTC) concatenated with 3-digit millis — equivalent to UnixMilli.
 	return fmt.Sprintf("%d", now.UTC().UnixMilli())
+}
+
+// clampNanoCompOrderMem trims and caps the merchant member id at the 30-byte
+// VARCHAR NANO documented for the request. Prefix-preserving so ops can still
+// grep a UUID in the NANO console against auth user ids.
+func clampNanoCompOrderMem(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= nanoCompOrderMemMaxLen {
+		return s
+	}
+	s = s[:nanoCompOrderMemMaxLen]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// encodeNanoReceiveURL percent-encodes the callback URL (including its query)
+// so NANO's request parser does not split on the raw `?` / `&` of nano_ts/nano_mac.
+// NANO POSTs to the decoded URL; our return handler still sees the query params.
+func encodeNanoReceiveURL(publicBase, query string) string {
+	raw := strings.TrimRight(publicBase, "/") + "/api/v1/payments/nano/return?" + query
+	return url.QueryEscape(raw)
 }
 
 func normalizeKRPhone(phone string) string {

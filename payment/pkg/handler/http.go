@@ -276,7 +276,7 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 			h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 			return
 		}
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", "application/json; charset=UTF-8")
 		req.Header.Set("CharSet", "UTF-8")
 		if ua := strings.TrimSpace(r.UserAgent()); ua != "" {
 			req.Header.Set("User-Agent", ua)
