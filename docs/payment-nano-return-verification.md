@@ -118,13 +118,7 @@ and is not required for return verification.
 |---|---|---|---|
 | [dupli1#233](https://github.com/elug3/dupli1/pull/233) | backend | **merged** 2026-09-05 | Browser return never renders JSON; declined vs unconfirmed classification; `payment.callback_rejected` ops alert |
 | [dupli1-web#106](https://github.com/elug3/dupli1-web/pull/106) | storefront | **merged** | The unconfirmed notice itself; retry suppression |
-| [dupli1-web#108](https://github.com/elug3/dupli1-web/pull/108) | storefront | **draft — on hold** | Unconfirmed warning shows even when the return carries no `order_id` |
-
-Until #108 lands there is a live gap worth knowing about: the backend omits
-`order_id` from the failure redirect on the `unknown_payment`, `shop_mismatch`
-and `lookup_failed` paths, and the merged storefront gates the "do not pay
-again" warning on that parameter. In those cases the shopper currently sees no
-warning at all.
+| [dupli1-web#108](https://github.com/elug3/dupli1-web/pull/108) | storefront | **merged** 2026-09-06 | Unconfirmed warning shows even when the return carries no `order_id` |
 
 The `?error=` reason vocabulary is a cross-repo contract, pinned on both sides —
 `TestNanoReturnUnconfirmedReasonsMatchStorefront` (Go) and

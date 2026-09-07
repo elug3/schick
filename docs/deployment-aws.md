@@ -9,7 +9,7 @@ Internet → Route53 (dupli1.com / www / manage.dupli1.com / images.dupli1.com)
         → ALB (HTTPS :443, HTTP :80)
              ├── manage.dupli1.com   → dupli1-manage-web (admin)
              ├── /api/*, /gateway/* → dupli1-proxy (nginx → Cloud Map)
-             │     auth / product / order / cart / payment / notification
+             │     auth / profile / product / order / cart / payment / notification
              └── /*                 → dupli1-web (storefront, bridge mode)
         → CloudFront (images.dupli1.com) → private S3 product-images (OAC)
          EC2 ASG (ECS capacity provider) in private subnets
@@ -26,7 +26,7 @@ Production uses **Amazon RDS PostgreSQL 16** (`dupli1-production`).
 
 | Component | Details |
 |-----------|---------|
-| Databases | `dupli1_db` (auth), `products`, `orders`, `cart`, `payments`, `notifications` (local Compose; wire on ECS — see [TODO.md](TODO.md)) |
+| Databases | `dupli1_db` (auth), `profiles`, `products`, `orders`, `cart`, `payments`, `notifications` (local Compose; wire on ECS — see [TODO.md](TODO.md)) |
 | Credentials | AWS Secrets Manager (`dupli1/production/*-db-url`, `jwt-secret`, `telegram`, `nats-token`) |
 | Network | Private subnets; ECS tasks + ECS instances SG → port 5432 |
 | SSL | `sslmode=require` |
@@ -72,6 +72,7 @@ must log in again — do it during a quiet window.
 | Service | Purpose |
 |---------|---------|
 | `dupli1-auth` | Authentication API |
+| `dupli1-profile` | Customer commerce profile + saved addresses |
 | `dupli1-product` | Product catalog + inventory |
 | `dupli1-order` | Order / checkout API |
 | `dupli1-cart` | Shopping cart API |
@@ -83,7 +84,7 @@ must log in again — do it during a quiet window.
 | `dupli1-redis` | Auth rate-limit / session cache |
 | `dupli1-nats` | Event bus |
 
-Cloud Map namespace: `dupli1.local` (short names: `auth`, `product`, `order`, `cart`, `payment`, …).
+Cloud Map namespace: `dupli1.local` (short names: `auth`, `profile`, `product`, `order`, `cart`, `payment`, …).
 
 ## Capacity notes
 

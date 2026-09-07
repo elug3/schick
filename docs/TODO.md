@@ -83,7 +83,7 @@ Completeness / code-quality follow-ups for `dupli1-notification`. Design: [notif
 - [ ] **NATS queue group for notification** — use `QueueSubscribe` so multi-replica ECS does not duplicate Telegram alerts (deferred in [v1-release-plan.md](v1-release-plan.md); log-first done).
 - [ ] **Fan-out to multiple accepted chats** — routing picks only the first accepted `alert_order` / `alert_product` chat.
 - [ ] **Manager Settings `notifications` section** — load/reload toggles + chat routing from auth settings on `settings.updated` ([manager-settings-api.md](manager-settings-api.md)); keep only `TELEGRAM_BOT_TOKEN` in Secrets Manager.
-- [ ] **Document `notification.telegram.read|manage` in permissions.md** — catalog constants exist; owner `*` works; manager seeds/docs lag.
+- [x] **Document `notification.telegram.read|manage` in permissions.md** — catalog + endpoint matrix added (2026-09-07).
 
 ### Docs / API surface drift
 

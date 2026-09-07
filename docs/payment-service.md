@@ -261,7 +261,7 @@ A refused callback the PG had already approved also publishes `payment.callback_
 
 | Method | Path | Who | Description |
 |--------|------|-----|-------------|
-| `POST` | `/api/v1/orders/{id}/ship` | `order.ship` | `paid` → `in_transit`, commit stock, audit (transition validated **before** stock commit) |
+| `POST` | `/api/v1/orders/{id}/ship` | `order.ship` | `paid` → `in_transit`, commit stock, audit (transition validated **before** stock commit; Postgres **`ShipIfPaid`** on persist) |
 | `PUT` | `/api/v1/orders/{id}/status` | RBAC | `fulfilled` from `in_transit`; `canceled` from `pending`/`paid` |
 
 **Ship response** includes `shipped_by`, `shipped_at`.
@@ -324,6 +324,7 @@ Local Postgres (payment): `postgres://dupli1:dupli1_dev@localhost:5437/payments?
 | Replayed `payment.succeeded` after ship | no-op when `payment_id` already set and status ≠ `pending` |
 | Payment succeeds after 5 min auto-cancel | order **reinstated** to `pending` with a fresh reservation and extended payment window, then marked `paid` |
 | Ship on non-`paid` order | rejected before stock commit — inventory unchanged |
+| Concurrent ship + full refund cancel | stock may commit first; `ShipIfPaid` skips persist when order is no longer `paid` — ops log when stock committed but status did not move |
 
 ---
 
