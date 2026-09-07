@@ -22,6 +22,7 @@ type contextKey struct{}
 // Claims holds the verified identity extracted from a JWT.
 type Claims struct {
 	UserID      string
+	Email       string
 	Permissions []string
 }
 
@@ -238,8 +239,10 @@ func claimsFromMap(mapClaims jwt.MapClaims) (Claims, error) {
 		return Claims{}, err
 	}
 	rawPerms := extractStringSlice(mapClaims, "permissions")
+	email, _ := mapClaims["email"].(string)
 	return Claims{
 		UserID:      userID,
+		Email:       strings.TrimSpace(email),
 		Permissions: permissions.Dedupe(rawPerms),
 	}, nil
 }

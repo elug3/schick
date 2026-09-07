@@ -55,6 +55,7 @@ func makeToken(t *testing.T, secret, userID string, perms []string) string {
 	t.Helper()
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":         userID,
+		"email":       userID + "@example.com",
 		"permissions": perms,
 		"exp":         time.Now().Add(time.Hour).Unix(),
 		"iat":         time.Now().Unix(),
@@ -282,12 +283,16 @@ func TestNanoReturn_UnsignedV27QueryMACSucceeds(t *testing.T) {
 	cfg := nanoStorefrontConfig()
 	mux, _, pub, created := nanoTestStack(t, cfg)
 	nano := checkout.NewNanoProvider(cfg)
-	_, body, err := nano.BuildRequest(created.ID, created.OrderID, created.CustomerID,
-		created.PayerName, created.PayerPhone, "", "Dupli1 "+created.OrderID, created.AmountCents, false)
+	_, body, err := nano.BuildRequest(created.ID, created.OrderID,
+		created.PayerName, created.PayerPhone, created.PayerEmail, "Dupli1 "+created.OrderID, created.AmountCents, false)
 	if err != nil {
 		t.Fatalf("BuildRequest: %v", err)
 	}
-	recv, err := url.Parse(body.ReceiveURL)
+	rawRecv, err := url.QueryUnescape(body.ReceiveURL)
+	if err != nil {
+		t.Fatalf("unescape receiveUrl: %v", err)
+	}
+	recv, err := url.Parse(rawRecv)
 	if err != nil {
 		t.Fatalf("parse receiveUrl: %v", err)
 	}

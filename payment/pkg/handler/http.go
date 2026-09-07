@@ -101,6 +101,7 @@ func (h *Handler) payments(w http.ResponseWriter, r *http.Request) {
 	payment, err := h.svc.CreatePayment(r.Context(), service.CreatePaymentInput{
 		OrderID:           req.OrderID,
 		CustomerID:        claims.UserID,
+		PayerEmail:        claims.Email,
 		BearerToken:       bearerToken,
 		IdempotencyKey:    r.Header.Get("Idempotency-Key"),
 		Method:            req.Method,
@@ -249,7 +250,7 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 
 	mobile := checkout.IsMobileUserAgent(r.UserAgent())
 	reqURL, body, err := h.nano.BuildRequest(
-		payment.ID, payment.OrderID, payment.CustomerID,
+		payment.ID, payment.OrderID,
 		payment.PayerName, payment.PayerPhone, payment.PayerEmail,
 		"Dupli1 "+payment.OrderID, payment.AmountCents, mobile,
 	)
@@ -276,7 +277,7 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 			h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 			return
 		}
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", "application/json; charset=UTF-8")
 		req.Header.Set("CharSet", "UTF-8")
 		if ua := strings.TrimSpace(r.UserAgent()); ua != "" {
 			req.Header.Set("User-Agent", ua)

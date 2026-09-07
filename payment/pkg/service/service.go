@@ -40,6 +40,7 @@ func New(repo ports.Repository, orders ports.OrderClient, checkout ports.Checkou
 type CreatePaymentInput struct {
 	OrderID        string
 	CustomerID     string
+	PayerEmail     string
 	BearerToken    string
 	IdempotencyKey string
 	Method         string
@@ -104,6 +105,7 @@ func (s *Service) createCardPayment(ctx context.Context, input CreatePaymentInpu
 		CustomerID:  order.CustomerID,
 		OrderName:   order.RecipientName,
 		OrderTel:    order.RecipientPhone,
+		OrderEmail:  strings.TrimSpace(input.PayerEmail),
 		GoodsName:   goodsName,
 	})
 	if err != nil {
@@ -117,6 +119,7 @@ func (s *Service) createCardPayment(ctx context.Context, input CreatePaymentInpu
 	payment.Method = domain.MethodCreditCard
 	payment.PayerName = strings.TrimSpace(order.RecipientName)
 	payment.PayerPhone = strings.TrimSpace(order.RecipientPhone)
+	payment.PayerEmail = strings.TrimSpace(input.PayerEmail)
 	if input.CreatedBy != "" {
 		payment.CreatedBy = input.CreatedBy
 	}

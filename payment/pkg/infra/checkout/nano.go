@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elug3/dupli1/payment/pkg/domain"
 	"github.com/elug3/dupli1/payment/pkg/ports"
@@ -27,6 +28,9 @@ const (
 	nanoPCRequestPath     = "/api/payment/cert/pc/request.io"
 	nanoMobileRequestPath = "/api/payment/cert/mobile/request.io"
 	nanoCancelPath        = "/api/payment/cancel.io"
+	// nanoCompOrderMemMaxLen is the 인증결제 request limit NANO quoted for
+	// compOrderMem (가맹점 회원 ID). We send the customer email, truncated.
+	nanoCompOrderMemMaxLen = 30
 )
 
 // NanoConfig holds NANO Solution certified-payment (인증결제) credentials.
@@ -156,7 +160,7 @@ type NanoRequest struct {
 }
 
 // BuildRequest builds a signed NANO cert payment request for the given payment snapshot.
-func (p *NanoProvider) BuildRequest(paymentID, orderID, customerID, orderName, orderTel, orderEmail, goodsName string, amountCents int64, mobile bool) (requestURL string, body NanoRequest, err error) {
+func (p *NanoProvider) BuildRequest(paymentID, orderID, orderName, orderTel, orderEmail, goodsName string, amountCents int64, mobile bool) (requestURL string, body NanoRequest, err error) {
 	if !p.cfg.Enabled() {
 		return "", NanoRequest{}, fmt.Errorf("nano credentials not configured")
 	}
@@ -195,9 +199,9 @@ func (p *NanoProvider) BuildRequest(paymentID, orderID, customerID, orderName, o
 		PayWay:       nanoPayWayCard,
 		GoodsName:    goodsName,
 		ReqPayAmt:    amt,
-		ReceiveURL:   p.cfg.publicBase() + "/api/v1/payments/nano/return?" + q.Encode(),
+		ReceiveURL:   encodeNanoReceiveURL(p.cfg.publicBase(), q.Encode()),
 		CompOrderNo:  paymentID,
-		CompOrderMem: customerID,
+		CompOrderMem: clampNanoCompOrderMem(orderEmail),
 		Timestamp:    ts,
 		HashValue:    hash,
 	}
@@ -299,6 +303,29 @@ func nanoTimestampFresh(ts string, now time.Time) bool {
 func nanoTimestamp(now time.Time) string {
 	// Docs: unix seconds (UTC) concatenated with 3-digit millis — equivalent to UnixMilli.
 	return fmt.Sprintf("%d", now.UTC().UnixMilli())
+}
+
+// clampNanoCompOrderMem trims and caps the merchant member id at the 30-byte
+// VARCHAR NANO documented for the request. We send the customer email (not the
+// 36-char auth UUID). Longer addresses are prefix-truncated.
+func clampNanoCompOrderMem(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= nanoCompOrderMemMaxLen {
+		return s
+	}
+	s = s[:nanoCompOrderMemMaxLen]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// encodeNanoReceiveURL percent-encodes the callback URL (including its query)
+// so NANO's request parser does not split on the raw `?` / `&` of nano_ts/nano_mac.
+// NANO POSTs to the decoded URL; our return handler still sees the query params.
+func encodeNanoReceiveURL(publicBase, query string) string {
+	raw := strings.TrimRight(publicBase, "/") + "/api/v1/payments/nano/return?" + query
+	return url.QueryEscape(raw)
 }
 
 func normalizeKRPhone(phone string) string {

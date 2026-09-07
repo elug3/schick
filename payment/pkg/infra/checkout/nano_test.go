@@ -1,6 +1,8 @@
 package checkout
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -117,7 +119,7 @@ func TestBuildRequest(t *testing.T) {
 		BaseURL: "https://dev3.nanopay.co.kr", Ver: "240000005", ShopCode: "240000005",
 		LoginID: "shoptest", APIKey: "secret", PublicBaseURL: "https://dupli1.com",
 	})
-	reqURL, body, err := p.BuildRequest("pay_1", "ord_1", "cust_1", "홍길동", "01012345678", "a@b.c", "가방", 1004, false)
+	reqURL, body, err := p.BuildRequest("pay_1", "ord_1", "홍길동", "01012345678", "a@b.c", "가방", 1004, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,10 +129,20 @@ func TestBuildRequest(t *testing.T) {
 	if body.PayWay != "card" || body.ReqPayAmt != "1004" || body.CompOrderNo != "pay_1" {
 		t.Fatalf("body = %+v", body)
 	}
-	if !strings.HasPrefix(body.ReceiveURL, "https://dupli1.com/api/v1/payments/nano/return?") {
-		t.Fatalf("receiveUrl = %s", body.ReceiveURL)
+	if body.CompOrderMem != "a@b.c" {
+		t.Fatalf("compOrderMem = %q, want customer email", body.CompOrderMem)
 	}
-	u, err := url.Parse(body.ReceiveURL)
+	rawRecv, err := url.QueryUnescape(body.ReceiveURL)
+	if err != nil {
+		t.Fatalf("unescape receiveUrl: %v", err)
+	}
+	if !strings.HasPrefix(rawRecv, "https://dupli1.com/api/v1/payments/nano/return?") {
+		t.Fatalf("decoded receiveUrl = %s", rawRecv)
+	}
+	if strings.Contains(body.ReceiveURL, "?") || strings.Contains(body.ReceiveURL, "&") {
+		t.Fatalf("receiveUrl sent to NANO must be percent-encoded, got %s", body.ReceiveURL)
+	}
+	u, err := url.Parse(rawRecv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +159,7 @@ func TestBuildRequest(t *testing.T) {
 	if body.HashValue != wantHash {
 		t.Fatalf("hash mismatch")
 	}
-	_, bodyM, err := p.BuildRequest("pay_1", "ord_1", "cust_1", "홍길동", "01012345678", "", "가방", 1004, true)
+	_, bodyM, err := p.BuildRequest("pay_1", "ord_1", "홍길동", "01012345678", "", "가방", 1004, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,6 +180,62 @@ func TestIsMobileUserAgent(t *testing.T) {
 func TestNormalizeKRPhone(t *testing.T) {
 	if got := normalizeKRPhone("010-4112-5167"); got != "01041125167" {
 		t.Fatalf("got %s", got)
+	}
+}
+
+func TestClampNanoCompOrderMem(t *testing.T) {
+	if got := clampNanoCompOrderMem("  cust_1  "); got != "cust_1" {
+		t.Fatalf("short id = %q", got)
+	}
+	email := "very.long.customer.email@dupli1.com"
+	if len(email) <= nanoCompOrderMemMaxLen {
+		t.Fatalf("fixture email len = %d, want > %d", len(email), nanoCompOrderMemMaxLen)
+	}
+	got := clampNanoCompOrderMem(email)
+	if len(got) != nanoCompOrderMemMaxLen {
+		t.Fatalf("clamped len = %d, want %d (%q)", len(got), nanoCompOrderMemMaxLen, got)
+	}
+	if got != email[:nanoCompOrderMemMaxLen] {
+		t.Fatalf("clamped = %q, want prefix of email", got)
+	}
+}
+
+func TestBuildRequest_CompOrderMemMaxLenAndEncodedReceiveURL(t *testing.T) {
+	p := NewNanoProvider(NanoConfig{
+		BaseURL: "https://dev3.nanopay.co.kr", Ver: "240000005", ShopCode: "240000005",
+		LoginID: "shoptest", APIKey: "secret", PublicBaseURL: "https://dupli1.com",
+	})
+	email := "very.long.customer.email@dupli1.com"
+	_, body, err := p.BuildRequest("pay_1", "ord_1", "홍길동", "01012345678", email, "가방", 1004, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body.CompOrderMem != email[:nanoCompOrderMemMaxLen] {
+		t.Fatalf("compOrderMem = %q, want truncated email", body.CompOrderMem)
+	}
+	if len(body.CompOrderMem) != nanoCompOrderMemMaxLen {
+		t.Fatalf("compOrderMem len = %d (%q), want %d", len(body.CompOrderMem), body.CompOrderMem, nanoCompOrderMemMaxLen)
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"receiveUrl":"https://`)) {
+		t.Fatalf("JSON receiveUrl must be percent-encoded, got %s", raw)
+	}
+	if bytes.Contains(raw, []byte(`nano/return?`)) || bytes.Contains(raw, []byte(`&nano_`)) {
+		t.Fatalf("JSON receiveUrl still has raw query delimiters: %s", raw)
+	}
+	decoded, err := url.QueryUnescape(body.ReceiveURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Query().Get("nano_mac") == "" || u.Query().Get("nano_ts") == "" {
+		t.Fatalf("decoded receiveUrl missing MAC query: %s", decoded)
 	}
 }
 

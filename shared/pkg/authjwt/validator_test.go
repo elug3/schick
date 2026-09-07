@@ -38,6 +38,28 @@ func TestHMACValidatorRequiresAccessType(t *testing.T) {
 	}
 }
 
+func TestHMACValidatorExtractsEmail(t *testing.T) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":   "user-1",
+		"email": " buyer@dupli1.com ",
+		"type":  "access",
+		"exp":   time.Now().Add(time.Hour).Unix(),
+	})
+	signed, err := token.SignedString([]byte("test-secret"))
+	if err != nil {
+		t.Fatalf("SignedString: %v", err)
+	}
+
+	v := NewHMACValidator("test-secret")
+	claims, err := v.ValidateAccessToken(signed)
+	if err != nil {
+		t.Fatalf("ValidateAccessToken: %v", err)
+	}
+	if claims.Email != "buyer@dupli1.com" {
+		t.Fatalf("Email = %q, want trimmed buyer@dupli1.com", claims.Email)
+	}
+}
+
 func TestHMACValidatorRejectsRefreshType(t *testing.T) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":  "user-1",

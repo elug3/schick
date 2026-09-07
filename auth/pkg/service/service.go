@@ -202,7 +202,7 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, er
 		_ = s.userRepo.Save(ctx, u)
 	}
 
-	token, err := s.refreshTokenGen.Generate(ctx, u.ID, nil)
+	token, err := s.refreshTokenGen.Generate(ctx, u.ID, nil, "")
 	if err != nil {
 		return "", fmt.Errorf("generate token: %w", err)
 	}
@@ -259,14 +259,14 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (accessToken
 		return "", "", autherrors.ErrAccountLocked
 	}
 
-	newAccessToken, err := s.tokenGen.Generate(ctx, u.ID, u.Permissions)
+	newAccessToken, err := s.tokenGen.Generate(ctx, u.ID, u.Permissions, u.Email)
 	if err != nil {
 		return "", "", fmt.Errorf("generate token: %w", err)
 	}
 
 	rotatedRefreshToken = refreshToken
 	if s.sessionStore != nil {
-		newRefreshToken, err := s.refreshTokenGen.Generate(ctx, u.ID, nil)
+		newRefreshToken, err := s.refreshTokenGen.Generate(ctx, u.ID, nil, "")
 		if err != nil {
 			return "", "", fmt.Errorf("generate refresh token: %w", err)
 		}

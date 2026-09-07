@@ -10,6 +10,6 @@ type Claims struct {
 
 // TokenGenerator defines the interface for token generation and validation.
 type TokenGenerator interface {
-	Generate(ctx context.Context, userID string, permissions []string) (string, error)
+	Generate(ctx context.Context, userID string, permissions []string, email string) (string, error)
 	Validate(ctx context.Context, token string) (Claims, error)
 }
