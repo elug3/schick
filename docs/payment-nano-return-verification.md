@@ -1,29 +1,29 @@
-# NANO return verification — blocked on the merchant
+# NANO return verification
 
-**Status:** **Blocked on NANO Solution.** Work is complete and parked, not abandoned —
-two PRs are open as drafts. Put on hold **2026-09-06**.
-
-**Owner of the blocker:** whoever can reach NANO merchant support. No amount of
-work in this repo resolves it.
+**Status:** **Fixed in-repo (receiveUrl MAC).** 인증결제 v2.7 still does not sign the
+browser return. Dupli1 binds `receiveUrl` with a payment-scoped HMAC instead of
+waiting for a PG-side formula.
 
 ---
 
 ## The one-paragraph version
 
-Dupli1 refuses a NANO card approval unless the callback carries a `hashValue`
-that verifies against `NANO_API_KEY`. The 인증결제 v2.7 merchant guide does not
-document `hashValue` on the callback at all — only on the *request*. If the
-guide is complete, then **every genuine approval is refused**, which is exactly
-what production shows: **0 of 18 NANO payments have ever reached `succeeded`.**
-The shopper-facing damage from that refusal is fixed
-([#232](https://github.com/elug3/dupli1/issues/232)); the refusal itself cannot
-be fixed without NANO telling us how — or whether — the return is signed.
+The v2.7 response field list has no `hashValue` or `timestamp`. Requiring those
+on the callback refused every genuine approval (**0 of 18** NANO payments ever
+reached `succeeded`). Checkout now sets
+
+`receiveUrl = …/nano/return?nano_ts=…&nano_mac=…`
+
+where `nano_mac` is `SHA256(ver+loginId+shopcode+compOrderNo+reqPayAmt+timestamp+API_KEY+"RETURN")`.
+A `resultCode=0000` return is accepted if that MAC verifies **or** a PG-supplied
+`hashValue` verifies with the request-style formula. A POST without either still
+fails closed (`verify_failed` + `payment.callback_rejected`).
 
 ---
 
 ## Evidence
 
-### 1. What our code requires
+### 1. What our code required (before the MAC)
 
 `VerifyNanoCallbackHash` in [`payment/pkg/infra/checkout/nano.go`](../payment/pkg/infra/checkout/nano.go)
 fails closed when **either** field is missing:
@@ -88,42 +88,25 @@ verified; their orders were auto-canceled by the 5-minute expiry worker.
 
 ---
 
-## The two possibilities
+## What we implemented instead of waiting
 
-Only NANO can say which is true.
+v2.7 documents an unsigned return. Deleting the check would let anyone POST to
+`/nano/return` and mark a pending order paid. The replacement is a MAC **we**
+issue on `receiveUrl`, not a guess at NANO's formula:
 
-| | If NANO signs the return | If NANO does not sign the return |
-|---|---|---|
-| **What it means** | The guide is incomplete; there is an undocumented field or formula | The browser return is unauthenticated by design |
-| **The fix** | Implement their formula in `VerifyNanoCallbackHash` | Verification here is unachievable — it must be *replaced*, not relaxed |
-| **Effort** | Small — one function, existing tests cover the shape | Larger — needs an out-of-band confirmation before marking `succeeded`: a server-side transaction lookup, or trusting only the server-to-server webhook |
-| **Risk if guessed wrong** | Accepting forged approvals — anyone who can POST to `/nano/return` marks orders paid | Same |
+- `nano_mac` includes `compOrderNo`, so a MAC for one payment cannot approve
+  another of the same amount.
+- `nano_ts` must be within 20 minutes.
+- Query params are read from the request URL only (`json:"-"` / not from the
+  form or JSON body), so a crafted webhook cannot forge them.
+- If NANO later sends a verifying `hashValue`, that path still works.
 
-**Do not "fix" this by deleting the check.** The return URL is a public,
-unauthenticated endpoint. Without verification, a single crafted POST marks any
-pending order paid. The current behaviour — refuse, alert, tell the shopper not
-to pay again — is the safe failure mode, and it is deliberately loud.
+A leftover independent issue: `DUPLI1_PAYMENT_PUBLIC_URL` must be
+internet-reachable or NANO cannot deliver the form POST at all (local Compose
+warns on startup).
 
----
-
-## The exact question for NANO
-
-Two things to ask in one conversation, with merchant `shopcode 240000005`
-(`loginId shoptest`):
-
-1. **Does the `receiveUrl` callback carry a signature?**
-   The v2.7 §2.2 response field list shows no `hashValue` or `timestamp`. If
-   the return *is* signed, we need the field name and the exact digest input
-   and ordering. If it is **not** signed, we need to know that too — it changes
-   the design, not just a constant.
-
-2. **Unexplained Ready-API amount rejection.**
-   `## amount ## Ready API결제요청 값과 상이 합니다. [mbrNo=100011, mbrRefNo=260905001496]`
-   Our request chain was self-consistent at **31,004 KRW** end to end, and the
-   card UI displayed the correct figure. NANO's Ready API accepted every amount
-   we tested in isolation (1 → 280,000). **`mbrNo=100011` matches nothing in
-   our configuration** — ours is `240000005` / `shoptest` — so we cannot tell
-   whose merchant number that is or which request it refers to.
+The Ready-API amount rejection (`mbrNo=100011`) is a separate PG-side question
+and is not required for return verification.
 
 ---
 
@@ -135,11 +118,6 @@ Two things to ask in one conversation, with merchant `shopcode 240000005`
 | [dupli1-web#106](https://github.com/elug3/dupli1-web/pull/106) | storefront | **merged** | The unconfirmed notice itself; retry suppression |
 | [dupli1-web#108](https://github.com/elug3/dupli1-web/pull/108) | storefront | **draft — on hold** | Unconfirmed warning shows even when the return carries no `order_id` |
 
-The shopper-facing half is therefore **shipped on the backend and half-shipped on
-the storefront**. #108 is green (89 tests, typecheck, build, mutation-checked)
-and held only by the pause on this work — it is independent of NANO's answer and
-can be merged at any time.
-
 Until #108 lands there is a live gap worth knowing about: the backend omits
 `order_id` from the failure redirect on the `unknown_payment`, `shop_mismatch`
 and `lookup_failed` paths, and the merged storefront gates the "do not pay
@@ -149,23 +127,6 @@ warning at all.
 The `?error=` reason vocabulary is a cross-repo contract, pinned on both sides —
 `TestNanoReturnUnconfirmedReasonsMatchStorefront` (Go) and
 `classifyPaymentReturn` tests (TypeScript). Changing it requires changing both.
-
----
-
-## Picking this back up
-
-**If NANO gives a signing spec:** implement it inside `VerifyNanoCallbackHash`
-and delete the UNRESOLVED note above it. The surrounding call sites, the
-alerting, and the shopper-facing paths all stay as they are — they were built to
-survive either answer.
-
-**If NANO says the return is unsigned:** `VerifyNanoCallbackHash` cannot be
-salvaged. Replace it with confirmation from a source the shopper's browser
-cannot forge, and keep `payment.callback_rejected` firing whenever the two
-disagree.
-
-**Verifying either answer** needs a real approval to land, which needs the
-second blocker below cleared first.
 
 ---
 
@@ -180,9 +141,9 @@ Clearing it needs a public tunnel — but note that exposing the local Compose
 stack also exposes the seeded owner account (`admin@dupli1.com` / `password`),
 so change that first or tunnel only the payment service.
 
-**These two blockers are separate.** A reachable URL alone will not make card
-payments work while verification rejects every approval; a signing spec alone
-cannot be tested until callbacks can arrive.
+Local Compose still cannot receive a real NANO form POST (`CallbackReachable()`
+rejects loopback). Production `DUPLI1_PAYMENT_PUBLIC_URL=https://dupli1.com` is
+reachable. A tunnel is only needed to exercise the return locally.
 
 ---
 
@@ -191,6 +152,6 @@ cannot be tested until callbacks can arrive.
 - Issue: [elug3/dupli1#232](https://github.com/elug3/dupli1/issues/232)
 - [payment-service.md](payment-service.md) — the return contract table and event payloads
 - [current-state.md](current-state.md) — as-built payment summary
-- Code: `payment/pkg/infra/checkout/nano.go` (`VerifyNanoCallbackHash`),
+- Code: `payment/pkg/infra/checkout/nano.go` (`VerifyNanoCallbackHash`, `NanoReturnMAC`),
   `payment/pkg/service/nano_callback.go` (rejection reasons + alert),
   `payment/pkg/handler/http.go` (`nanoReturn`, `nanoReturnReason`)

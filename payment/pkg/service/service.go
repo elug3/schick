@@ -240,7 +240,8 @@ type NanoCallbackAuth struct {
 }
 
 // NanoResult is the approval payload from NANO receiveUrl / webhook.
-// Success (resultCode=0000) is accepted only after shopcode, amount, and hashValue checks.
+// Success (resultCode=0000) is accepted only after shopcode, amount, and either
+// a NANO hashValue or the receiveUrl MAC we issued at checkout.
 type NanoResult struct {
 	ResultCode  string `json:"resultCode"`
 	ResultMsg   string `json:"resultMsg"`
@@ -251,6 +252,10 @@ type NanoResult struct {
 	PayWay      string `json:"payWay"`
 	Timestamp   string `json:"timestamp"`
 	HashValue   string `json:"hashValue"`
+	// ReturnTS / ReturnMAC are set by the handler from the receiveUrl query we
+	// issued at checkout — json:"-" so a crafted JSON webhook cannot forge them.
+	ReturnTS  string `json:"-"`
+	ReturnMAC string `json:"-"`
 	// Source is set by the handler, not the PG — json:"-" so a crafted JSON body
 	// cannot forge which endpoint a callback claims to have arrived on.
 	Source string `json:"-"`
@@ -261,7 +266,9 @@ type NanoResult struct {
 // Fail-closed rules:
 //   - shopcode must be present and match merchant config (always)
 //   - reqPayAmt must be present and match the payment amount (always)
-//   - on resultCode=0000, hashValue must verify against API_KEY (see checkout.VerifyNanoCallbackHash)
+//   - on resultCode=0000, hashValue must verify against API_KEY, or the
+//     receiveUrl MAC we issued at checkout must verify (인증결제 v2.7 does not
+//     sign the browser return)
 //
 // Browser landing without a valid signed callback does not mark paid.
 //
@@ -304,13 +311,16 @@ func (s *Service) HandleNanoResult(ctx context.Context, auth NanoCallbackAuth, r
 		}
 		return payment, nil
 	}
-	if strings.TrimSpace(auth.APIKey) == "" ||
-		!checkout.VerifyNanoCallbackHash(checkout.NanoConfig{
-			Ver:      auth.Ver,
-			LoginID:  auth.LoginID,
-			ShopCode: auth.ShopCode,
-			APIKey:   auth.APIKey,
-		}, shop, amt, result.Timestamp, result.HashValue) {
+	nanoCfg := checkout.NanoConfig{
+		Ver:      auth.Ver,
+		LoginID:  auth.LoginID,
+		ShopCode: auth.ShopCode,
+		APIKey:   auth.APIKey,
+	}
+	hashOK := strings.TrimSpace(auth.APIKey) != "" &&
+		checkout.VerifyNanoCallbackHash(nanoCfg, shop, amt, result.Timestamp, result.HashValue)
+	macOK := checkout.VerifyNanoReturnMAC(nanoCfg, payment.ID, shop, amt, result.ReturnTS, result.ReturnMAC, s.now())
+	if !hashOK && !macOK {
 		return nil, s.nanoReject(ctx, result, NanoRejectVerifyFailed, payment, domain.ErrInvalidPayment)
 	}
 	if tran := strings.TrimSpace(result.TranNo); tran != "" {

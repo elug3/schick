@@ -189,7 +189,7 @@ Add to `shared/pkg/permissions` catalog, fulfillment / order-manager bundles, an
 
 Customer **name and phone** for certified PG requests come from the **order snapshot** at checkout complete (copied onto the payment row as `payer_*` for the checkout bridge). Optional prefill from auth profile: [auth-profile-extension-plan.md](auth-profile-extension-plan.md).
 
-Hash (request + callback): `SHA256(ver+loginId+shopcode+reqPayAmt+timestamp+API_KEY+"NANO")`. Success callbacks must include matching `timestamp`/`hashValue`; Dupli1 fails closed if either is missing or the digest does not match. Confirm against the merchant return-hash section of the NANO API guide — if the live return formula differs, update `VerifyNanoCallbackHash` (do not disable verification). Do **not** integrate 수기결제 (key-in) — that would put PAN on Dupli1.
+Hash (request): `SHA256(ver+loginId+shopcode+reqPayAmt+timestamp+API_KEY+"NANO")`. 인증결제 v2.7 does not sign the browser return, so checkout binds `receiveUrl` with `nano_ts`/`nano_mac` (`SHA256(ver+loginId+shopcode+compOrderNo+reqPayAmt+timestamp+API_KEY+"RETURN")`). Success callbacks must match `shopcode` + `reqPayAmt` and either a PG `hashValue` or that MAC. Do **not** integrate 수기결제 (key-in) — that would put PAN on Dupli1.
 
 **Open questions (resolve before coding Bitcoin)**
 
@@ -296,7 +296,7 @@ Bypass should **not** go through Stripe or the `simulate-success` URL. It calls 
 
 1. **Bypass is privileged.** Missing `payment.bypass` → 403 even if the caller owns the order.
 2. **Never trust client amount** for any method.
-3. **NANO return/webhook is source of truth for card** — fail closed: require `shopcode` + `reqPayAmt` match, and verify `hashValue` with `NANO_API_KEY` (same request-style digest over callback `timestamp` until merchant docs specify a distinct return formula). Browser landing without a valid signed callback does not mark paid.
+3. **NANO return/webhook is source of truth for card** — fail closed: require `shopcode` + `reqPayAmt` match, and either a verifying `hashValue` or the `receiveUrl` MAC issued at checkout. Browser landing without either does not mark paid.
 4. **Bitcoin (later):** verify provider signatures / IPN authenticity the same way NANO result fields are checked.
 5. **Audit:** Bypass always stores `created_by`; manage-web should show who marked paid.
 6. Keep **dev `simulate-success`** gated (NANO unset only) — distinct from Bypass (Bypass is intentional prod ops tooling).

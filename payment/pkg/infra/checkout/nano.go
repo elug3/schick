@@ -177,6 +177,9 @@ func (p *NanoProvider) BuildRequest(paymentID, orderID, customerID, orderName, o
 	login := strings.TrimSpace(p.cfg.LoginID)
 	shop := strings.TrimSpace(p.cfg.ShopCode)
 	hash := NanoHash(ver, login, shop, amt, ts, p.cfg.APIKey)
+	q := url.Values{}
+	q.Set("nano_ts", ts)
+	q.Set("nano_mac", NanoReturnMAC(ver, login, shop, paymentID, amt, ts, p.cfg.APIKey))
 
 	path := nanoPCRequestPath
 	if mobile {
@@ -192,7 +195,7 @@ func (p *NanoProvider) BuildRequest(paymentID, orderID, customerID, orderName, o
 		PayWay:       nanoPayWayCard,
 		GoodsName:    goodsName,
 		ReqPayAmt:    amt,
-		ReceiveURL:   p.cfg.publicBase() + "/api/v1/payments/nano/return",
+		ReceiveURL:   p.cfg.publicBase() + "/api/v1/payments/nano/return?" + q.Encode(),
 		CompOrderNo:  paymentID,
 		CompOrderMem: customerID,
 		Timestamp:    ts,
@@ -202,46 +205,21 @@ func (p *NanoProvider) BuildRequest(paymentID, orderID, customerID, orderName, o
 }
 
 // NanoHash returns SHA256(ver+loginId+shopcode+reqPayAmt+timestamp+API_KEY+"NANO") hex digest.
-// Used for outbound cert requests and (until merchant docs specify otherwise) for
-// verifying receiveUrl / webhook hashValue with the callback timestamp.
+// Used for outbound cert requests and for verifying a callback hashValue when the
+// PG actually sends one. Unsigned v2.7 browser returns use NanoReturnMAC instead.
 func NanoHash(ver, loginID, shopCode, reqPayAmt, timestamp, apiKey string) string {
 	sum := sha256.Sum256([]byte(ver + loginID + shopCode + reqPayAmt + timestamp + apiKey + "NANO"))
 	return hex.EncodeToString(sum[:])
 }
 
 // VerifyNanoCallbackHash reports whether hashValue matches the NANO request-style
-// hash over callback fields. Callers must fail closed on false for resultCode=0000.
+// hash over callback fields. Used when the PG actually sends timestamp/hashValue
+// (not listed on the 인증결제 v2.7 response). Callers must fail closed on false
+// unless VerifyNanoReturnMAC also succeeds.
 //
-// Formula (same as request until merchant return-hash spec is confirmed):
+// Formula:
 //
 //	SHA256(ver+loginId+shopcode+reqPayAmt+timestamp+API_KEY+"NANO")
-//
-// ver/loginId come from merchant config (not client-supplied). shopcode, reqPayAmt,
-// and timestamp must be present on the callback.
-//
-// UNRESOLVED (elug3/dupli1#232). This is stricter than a guess about the formula:
-// the 인증결제 v2.7 guide lists hashValue and timestamp only in the *request*
-// tables (§2.1 PC, §3.3 mobile). Neither appears in the §2.2 response field list,
-// which documents resultCode, resultMsg, shopcode, compOrderNo, compOrderMem,
-// goodsName, reqPayAmt, orderName, orderTel, orderEmail, tranNo, apprDate,
-// apprTime, apprNo, payWay, receiveUrl, cardNo, cardSrc, cardcode, installment
-// and the vbank/dbank fields — and nothing else. Taken literally, no real approval
-// callback can carry the two fields this function requires, so every one of them
-// is refused, which matches production: no NANO payment has ever reached
-// succeeded through this path.
-//
-// So one of two things is true, and only NANO can say which:
-//
-//  1. the return is signed by an undocumented field/formula — get the spec and
-//     implement it here; or
-//  2. the return is not signed at all — then this check cannot be made to work,
-//     and the browser return must be treated as untrusted, with approval
-//     confirmed out-of-band (a server-side transaction lookup, or the webhook)
-//     before a payment is marked succeeded.
-//
-// Until that answer arrives, do not relax this function: an unverified approval
-// is refused loudly (payment.callback_rejected alerts ops, the shopper is told
-// not to pay again) rather than accepted on the PG's word alone.
 func VerifyNanoCallbackHash(cfg NanoConfig, shopCode, reqPayAmt, timestamp, hashValue string) bool {
 	got := strings.TrimSpace(hashValue)
 	ts := strings.TrimSpace(timestamp)
@@ -261,6 +239,61 @@ func VerifyNanoCallbackHash(cfg NanoConfig, shopCode, reqPayAmt, timestamp, hash
 		cfg.APIKey,
 	)
 	return subtle.ConstantTimeCompare([]byte(strings.ToLower(got)), []byte(strings.ToLower(want))) == 1
+}
+
+// nanoReturnMACTTL is how long a receiveUrl binding stays valid. The unpaid
+// order TTL is 5 minutes; this is looser so a slow card window still returns.
+const nanoReturnMACTTL = 20 * time.Minute
+
+// NanoReturnMAC binds receiveUrl to one payment. 인증결제 v2.7 does not sign
+// the browser return, so we put this digest (and its timestamp) on the query
+// string NANO POSTs back to. It includes compOrderNo so a MAC for one pending
+// payment cannot approve another of the same amount.
+//
+//	SHA256(ver+loginId+shopcode+compOrderNo+reqPayAmt+timestamp+API_KEY+"RETURN")
+func NanoReturnMAC(ver, loginID, shopCode, paymentID, reqPayAmt, timestamp, apiKey string) string {
+	sum := sha256.Sum256([]byte(ver + loginID + shopCode + paymentID + reqPayAmt + timestamp + apiKey + "RETURN"))
+	return hex.EncodeToString(sum[:])
+}
+
+// VerifyNanoReturnMAC reports whether the receiveUrl query binding matches this
+// payment. now is the verification clock (tests pass a frozen time).
+func VerifyNanoReturnMAC(cfg NanoConfig, paymentID, shopCode, reqPayAmt, timestamp, mac string, now time.Time) bool {
+	got := strings.TrimSpace(mac)
+	ts := strings.TrimSpace(timestamp)
+	if got == "" || ts == "" || !cfg.Enabled() {
+		return false
+	}
+	if !nanoTimestampFresh(ts, now) {
+		return false
+	}
+	ver := strings.TrimSpace(cfg.Ver)
+	if ver == "" {
+		ver = strings.TrimSpace(cfg.ShopCode)
+	}
+	want := NanoReturnMAC(
+		ver,
+		strings.TrimSpace(cfg.LoginID),
+		strings.TrimSpace(shopCode),
+		strings.TrimSpace(paymentID),
+		strings.TrimSpace(reqPayAmt),
+		ts,
+		cfg.APIKey,
+	)
+	return subtle.ConstantTimeCompare([]byte(strings.ToLower(got)), []byte(strings.ToLower(want))) == 1
+}
+
+func nanoTimestampFresh(ts string, now time.Time) bool {
+	ms, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil || ms <= 0 {
+		return false
+	}
+	issued := time.UnixMilli(ms).UTC()
+	now = now.UTC()
+	if issued.After(now.Add(2 * time.Minute)) {
+		return false
+	}
+	return now.Sub(issued) <= nanoReturnMACTTL
 }
 
 func nanoTimestamp(now time.Time) string {

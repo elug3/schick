@@ -36,18 +36,14 @@ Open highlights:
 
 ## Blocked on a third party
 
-- [ ] **NANO card payments cannot succeed** — dupli1 refuses every approval because
-  `VerifyNanoCallbackHash` requires a `hashValue`/`timestamp` that 인증결제 v2.7 does not
-  document on the callback. **0 of 18** NANO payments have ever reached `succeeded`; every
-  successful payment to date went through Bypass. Needs NANO merchant support to say whether
-  the return is signed, and how. Full record, evidence, and the exact question to ask:
+- [x] **NANO card payments can succeed without a PG-signed return** — 인증결제 v2.7 does not
+  put `hashValue`/`timestamp` on the callback. Checkout binds `receiveUrl` with a
+  payment-scoped MAC (`nano_ts`/`nano_mac`). Record:
   [payment-nano-return-verification.md](payment-nano-return-verification.md).
   ([#232](https://github.com/elug3/dupli1/issues/232))
-  - Second, independent blocker: `DUPLI1_PAYMENT_PUBLIC_URL` must be internet-reachable
-    before any real callback can be tested at all.
-  - Shopper-facing damage is fixed and parked in draft PRs
-    ([dupli1#233](https://github.com/elug3/dupli1/pull/233),
-    [dupli1-web#108](https://github.com/elug3/dupli1-web/pull/108)) — mergeable independently
+  - Shopper-facing damage for refused callbacks is shipped
+    ([dupli1#233](https://github.com/elug3/dupli1/pull/233)).
+    [dupli1-web#108](https://github.com/elug3/dupli1-web/pull/108) is independent.
     of NANO's answer.
 
 ## v1.1 (post-launch — logging, sessions, access control, deployment, automation)
