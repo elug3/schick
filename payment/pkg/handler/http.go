@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/elug3/dupli1/payment/pkg/domain"
 	"github.com/elug3/dupli1/payment/pkg/infra/checkout"
@@ -216,6 +218,12 @@ func (h *Handler) cancelPayment(w http.ResponseWriter, r *http.Request, paymentI
 // Every failure on this path is safe to retry: the card window has not opened
 // yet, so nothing has been charged. That is why the bridge always uses
 // nanoReturnCheckoutFailed and never an unconfirmed reason.
+//
+// Production fingerprint of the blank-page bug: GET .../nano/checkout returned
+// HTTP 200, Content-Type text/html; charset=utf-8, and a 0-byte body. That is
+// this handler copying an empty 2xx from NANO (or the page reached after the
+// default HTTP client followed a 302 without NANO's cookies). Never stream an
+// empty body; fall back to the browser launcher instead.
 func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID string) {
 	if h.nano == nil {
 		respondError(w, http.StatusNotFound, "not found")
@@ -265,15 +273,14 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("CharSet", "UTF-8")
+	if ua := strings.TrimSpace(r.UserAgent()); ua != "" {
+		req.Header.Set("User-Agent", ua)
+	}
 	if cfg.APIKey != "" {
 		req.Header.Set("API_KEY", cfg.APIKey)
 	}
 
-	client := cfg.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
+	resp, err := nanoCheckoutHTTPClient(cfg.HTTPClient).Do(req)
 	if err != nil {
 		log.Printf("payment nano checkout request: %v", err)
 		h.writeNanoLauncher(w, reqURL, body)
@@ -287,11 +294,12 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 		return
 	}
 
-	ct := resp.Header.Get("Content-Type")
-	if loc := resp.Header.Get("Location"); resp.StatusCode >= 300 && resp.StatusCode < 400 && loc != "" {
+	if loc := nanoRedirectLocation(resp); loc != "" {
 		http.Redirect(w, r, loc, http.StatusFound)
 		return
 	}
+
+	ct := resp.Header.Get("Content-Type")
 	if strings.Contains(ct, "application/json") || (len(respBody) > 0 && respBody[0] == '{') {
 		var parsed map[string]any
 		if err := json.Unmarshal(respBody, &parsed); err == nil {
@@ -311,6 +319,12 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 				h.failNanoReturn(w, r, cfg, payment.OrderID, payment.ID, nanoReturnCheckoutFailed)
 				return
 			}
+			// resultCode 0000 (or no code) without a pay URL is not a payment
+			// window — do not dump the JSON as the page.
+			log.Printf("payment: nano checkout %s: JSON with no pay URL (resultCode=%v); using browser launcher",
+				payment.ID, parsed["resultCode"])
+			h.writeNanoLauncher(w, reqURL, body)
+			return
 		}
 	}
 	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
@@ -323,18 +337,66 @@ func (h *Handler) nanoCheckout(w http.ResponseWriter, r *http.Request, paymentID
 		h.writeNanoLauncher(w, reqURL, body)
 		return
 	}
+	if len(bytes.TrimSpace(respBody)) == 0 {
+		log.Printf("payment: nano checkout %s: empty %d from NANO; using browser launcher", payment.ID, resp.StatusCode)
+		h.writeNanoLauncher(w, reqURL, body)
+		return
+	}
 
 	if ct != "" {
 		w.Header().Set("Content-Type", ct)
 	} else {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(respBody)
 }
 
+// nanoCheckoutHTTPClient POSTs to NANO without following redirects. The default
+// client would consume a 302 to the payment window server-side (no PG cookies),
+// then stream whatever empty 200 that hop returned as the shopper's page.
+func nanoCheckoutHTTPClient(base *http.Client) *http.Client {
+	timeout := 20 * time.Second
+	var transport http.RoundTripper
+	if base != nil {
+		if base.Timeout > 0 {
+			timeout = base.Timeout
+		}
+		transport = base.Transport
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// nanoRedirectLocation returns an absolute Location for a 3xx, resolved against
+// the NANO request URL so a relative /pay/… is not applied to dupli1.com.
+func nanoRedirectLocation(resp *http.Response) string {
+	if resp == nil || resp.StatusCode < 300 || resp.StatusCode >= 400 {
+		return ""
+	}
+	loc := strings.TrimSpace(resp.Header.Get("Location"))
+	if loc == "" {
+		return ""
+	}
+	ref, err := url.Parse(loc)
+	if err != nil {
+		return ""
+	}
+	if resp.Request != nil && resp.Request.URL != nil {
+		return resp.Request.URL.ResolveReference(ref).String()
+	}
+	return loc
+}
+
 // writeNanoLauncher serves an HTML page that POSTs the signed JSON from the browser.
-// Used when the payment service host is not yet allowlisted by NANO.
+// Used when the payment service host is not yet allowlisted by NANO, or when the
+// server-side POST returned an empty/unusable body (a blank page to the shopper).
 func (h *Handler) writeNanoLauncher(w http.ResponseWriter, reqURL string, body checkout.NanoRequest) {
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -369,10 +431,12 @@ func (h *Handler) writeNanoLauncher(w http.ResponseWriter, reqURL string, body c
       if (j.resultCode && j.resultCode !== "0000") {
         throw new Error(j.resultMsg || ("결제 요청 실패: " + j.resultCode));
       }
-      document.open(); document.write(JSON.stringify(j)); document.close();
-      return;
+      throw new Error("결제창 URL이 없습니다");
     }
     const html = await res.text();
+    if (!html.trim()) {
+      throw new Error("결제창 응답이 비어 있습니다");
+    }
     document.open(); document.write(html); document.close();
   } catch (e) {
     const el = document.getElementById("err");
