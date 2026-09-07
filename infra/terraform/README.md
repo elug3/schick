@@ -14,7 +14,9 @@ Terraform provisions the production compute path on the existing VPC and RDS:
 | CloudWatch Logs | `/ecs/dupli1-*` log groups |
 | ECS services | auth, product, order, cart, payment, notification, profile, proxy, web, manage-web, redis, nats |
 
-Existing resources reused (not recreated): VPC `dupli1-prod-vpc`, ECS cluster `production`, RDS `dupli1-production`, ECR repos, Cloud Map `dupli1.local`, Secrets Manager DB URLs / JWT / Telegram. A missing ECR repo for a new matrix service (for example `dupli1-profile`) is created by `.github/workflows/aws.yml` on the first push to `main`, not by this Terraform.
+Existing resources reused (not recreated): VPC `dupli1-prod-vpc`, ECS cluster `production`, RDS `dupli1-production`, ECR repos **except** `dupli1-profile`, Cloud Map `dupli1.local`, Secrets Manager DB URLs / JWT / Telegram.
+
+`dupli1-profile` is Terraform-managed (`aws_ecr_repository.profile`). Older service repos stay as `data.aws_ecr_repository` lookups. GitHub Actions `AmazonEC2ContainerRegistryPowerUser` cannot create repositories; `aws_iam_role_policy.github_actions_ecr_create` grants `ecr:CreateRepository` on `dupli1-*` so `.github/workflows/aws.yml` can create a missing matrix repo after this policy is applied.
 
 ## Telegram (notification)
 

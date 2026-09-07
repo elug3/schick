@@ -103,7 +103,15 @@ After Phase 1 cleanup (2026-07-26): orphans removed, ASG **5×`t3.large`**. Targ
 
 Backend (`dupli1`) and frontends (`dupli1-web`, `dupli1-manage-web`) deploy via **GitHub OIDC** and IAM role `github-actions-deploy-role` (ECR push + ECS deploy). Do not use long-lived `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` secrets for CI.
 
-`.github/workflows/aws.yml` creates a missing ECR repository before push (scan-on-push, AES256). Terraform looks up those repos with `data.aws_ecr_repository` and does not create them.
+`AmazonEC2ContainerRegistryPowerUser` on that role can push to **existing** ECR repos only. `dupli1-profile` is created by Terraform (`aws_ecr_repository.profile` in `infra/terraform/ecr.tf`). The AWS workflow also has an ensure-repo step that can `ecr:CreateRepository` for `dupli1-*` once `aws_iam_role_policy.github_actions_ecr_create` is applied.
+
+Until `terraform apply` has created the repo (or the IAM policy), `Build dupli1-profile` fails with either “repository does not exist” or `AccessDeniedException` on `CreateRepository`. One-shot equivalent:
+
+```bash
+aws ecr create-repository --region us-east-1 --repository-name dupli1-profile \
+  --image-scanning-configuration scanOnPush=true \
+  --encryption-configuration encryptionType=AES256
+```
 
 ## Local development
 

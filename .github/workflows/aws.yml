@@ -72,9 +72,9 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # Existing services were created outside Terraform (data.aws_ecr_repository
-      # lookups). New services such as dupli1-profile would otherwise fail the
-      # push with: "The repository with name '…' does not exist in the registry".
+      # AmazonEC2ContainerRegistryPowerUser does not include CreateRepository.
+      # After terraform apply of github_actions_ecr_create (and/or
+      # aws_ecr_repository.profile), describe succeeds or create is allowed.
       - name: Ensure ECR repository exists
         if: github.event_name != 'pull_request'
         env:

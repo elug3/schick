@@ -30,7 +30,6 @@ data "aws_ecr_repository" "services" {
     "dupli1-cart",
     "dupli1-payment",
     "dupli1-notification",
-    "dupli1-profile",
     "dupli1-proxy",
   ])
   name = each.key
@@ -66,7 +65,7 @@ locals {
     cart         = "${data.aws_ecr_repository.services["dupli1-cart"].repository_url}:${var.image_tag}"
     payment      = "${data.aws_ecr_repository.services["dupli1-payment"].repository_url}:${var.image_tag}"
     notification = "${data.aws_ecr_repository.services["dupli1-notification"].repository_url}:${var.image_tag}"
-    profile      = "${data.aws_ecr_repository.services["dupli1-profile"].repository_url}:${var.image_tag}"
+    profile      = "${aws_ecr_repository.profile.repository_url}:${var.image_tag}"
     proxy        = "${data.aws_ecr_repository.services["dupli1-proxy"].repository_url}:${var.image_tag}"
   }
 }
