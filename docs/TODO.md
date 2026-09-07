@@ -250,7 +250,7 @@ Architecture is suitable (ECS on EC2 + ALB + RDS + Terraform + GitHub Actions). 
 
 - [ ] **Manager settings API** — sketch in [manager-settings-api.md](manager-settings-api.md) (`GET|PATCH /api/v1/settings/{section}`).
 - [x] **Enable `awsvpcTrunking` for the ECS instance role** — confirmed live on container instances (2026-07-14); ASG Terraform defaults lowered to 2/1/4.
-- [ ] **Align `dupli1-web` / `dupli1-manage-web` CI task defs with live Terraform** — workflows still use Fargate/`awsvpc`/`web-container`; live storefront is EC2 `bridge` / family `dupli1-web` / container `web`.
+- [ ] **Create `dupli1-profile` ECR repo** — Terraform: `aws_ecr_repository.profile` + `github_actions_ecr_create` IAM. `terraform apply` (or the one-shot `aws ecr create-repository` in [deployment-aws.md](deployment-aws.md)) unblocks `Build dupli1-profile`. PowerUser cannot `CreateRepository`.
 - [x] **Prefer OIDC for backend CI** — backend `.github/workflows/aws.yml` uses `github-actions-deploy-role` (no long-lived access keys).
 - [ ] **HTTP→HTTPS redirect on ALB `:80` default action** — Terraform models redirect; live still serves HTTP for health/clients (API rule intact).
 - [ ] **Apply cost cleanup** — follow [aws-cost-reduction-plan.md](aws-cost-reduction-plan.md) (Phases 1–2); script: `infra/scripts/cleanup-aws-orphans.sh`. Evidence: [aws-cost-optimization.md](aws-cost-optimization.md).

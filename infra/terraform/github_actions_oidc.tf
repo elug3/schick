@@ -81,3 +81,26 @@ resource "aws_iam_role_policy_attachment" "github_actions_ecr_power_user" {
   role       = aws_iam_role.github_actions_deploy.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
 }
+
+# PowerUser covers push/pull to existing repos, not CreateRepository.
+# Needed by .github/workflows/aws.yml "Ensure ECR repository exists".
+resource "aws_iam_role_policy" "github_actions_ecr_create" {
+  name = "ECRCreateRepository"
+  role = aws_iam_role.github_actions_deploy.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "CreateDupli1ECRRepositories"
+        Effect = "Allow"
+        Action = [
+          "ecr:CreateRepository",
+          "ecr:TagResource",
+          "ecr:PutImageScanningConfiguration",
+        ]
+        Resource = "*"
+      },
+    ]
+  })
+}
