@@ -85,6 +85,9 @@ func TestBrandCodeFromName(t *testing.T) {
 	if got := BrandCodeFromName("Gucci"); got != "GUC" {
 		t.Fatalf("got %q", got)
 	}
+	if got := BrandCodeFromName("Dupli1 Studio"); got != "DUP" {
+		t.Fatalf("got %q", got)
+	}
 }
 
 func TestColorAndSizeFromName(t *testing.T) {
