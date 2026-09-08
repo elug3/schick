@@ -387,3 +387,31 @@ func TestSaveWithOutboxPersistsCancelAndEvent(t *testing.T) {
 		t.Fatalf("subject = %q, want %q", pending[0].Subject, ports.PaymentCanceledSubject)
 	}
 }
+
+// payer_* columns were added for NANO compOrderMem (PR #244). A round-trip must
+// survive Save/Get — nanoCheckout reads them when building the PG request.
+func TestPayerFieldsRoundTrip(t *testing.T) {
+	repo := migratedRepo(t, "payment_payer_fields_test")
+	ctx := t.Context()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	p, err := domain.NewPayment("pay_payer", "ord_payer", "cust_1", 70000,
+		domain.DefaultCurrency, domain.ProviderNano, "2409030071109",
+		"http://localhost:8080/api/v1/payments/pay_payer/nano/checkout", now)
+	if err != nil {
+		t.Fatalf("NewPayment: %v", err)
+	}
+	p.PayerName = "홍길동"
+	p.PayerPhone = "01012345678"
+	p.PayerEmail = "buyer@dupli1.com"
+	if err := repo.Save(ctx, p); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := repo.Get(ctx, "pay_payer")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.PayerName != "홍길동" || got.PayerPhone != "01012345678" || got.PayerEmail != "buyer@dupli1.com" {
+		t.Fatalf("payer fields = %q / %q / %q", got.PayerName, got.PayerPhone, got.PayerEmail)
+	}
+}
