@@ -49,14 +49,14 @@ type Order struct {
 	Status        string `json:"status"`
 	SubtotalCents int64  `json:"subtotal_cents"`
 	DiscountCents int64  `json:"discount_cents"`
-	// ShippingFeeCents is the delivery charge included in TotalCents, in whole
+	// ShippingFeeKRW is the delivery charge included in TotalCents, in whole
 	// KRW. Zero for orders placed before shipping fees existed, and for any
 	// deployment running with delivery free.
-	ShippingFeeCents int64       `json:"shipping_fee_cents"`
-	TotalCents       int64       `json:"total_cents"`
-	Items            []OrderItem `json:"items"`
-	CreatedAt        time.Time   `json:"created_at"`
-	Occurred         time.Time   `json:"occurred_at"`
+	ShippingFeeKRW int64       `json:"shipping_fee_krw"`
+	TotalCents     int64       `json:"total_cents"`
+	Items          []OrderItem `json:"items"`
+	CreatedAt      time.Time   `json:"created_at"`
+	Occurred       time.Time   `json:"occurred_at"`
 }
 
 // Product is the payload for ProductCreated, ProductUpdated,

@@ -263,8 +263,9 @@ services:
       DUPLI1_ORDER_SERVICE_EMAIL: dupli1-order@order.dupli1.com
       DUPLI1_ORDER_SERVICE_PASSWORD: dupli1-order-dev-secret
       DUPLI1_ORDER_DB: postgres://dupli1:dupli1_dev@postgres-order:5432/orders?sslmode=disable
-      # Flat per-order delivery charge in whole KRW. Unset/0 means free delivery.
-      DUPLI1_ORDER_SHIPPING_FEE_CENTS: ${DUPLI1_ORDER_SHIPPING_FEE_CENTS:-30000}
+      # Flat per-order delivery charge in whole KRW. Unset uses 30000; 0 is free.
+      # DUPLI1_ORDER_SHIPPING_FEE_CENTS is a deprecated alias.
+      DUPLI1_ORDER_SHIPPING_FEE_KRW: ${DUPLI1_ORDER_SHIPPING_FEE_KRW:-${DUPLI1_ORDER_SHIPPING_FEE_CENTS:-30000}}
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-do-not-use-in-production}
       AUTH_JWKS_URL: http://dupli1-auth:8080/api/v1/auth/.well-known/jwks.json
       NATS_URL: nats://nats:4222

@@ -32,22 +32,22 @@ type CheckoutSession struct {
 	CouponCode       string                `json:"coupon_code,omitempty"`
 	SubtotalCents    int64                 `json:"subtotal_cents"`
 	DiscountCents    int64                 `json:"discount_cents"`
-	// ShippingFeeCents is the delivery charge quoted for this session, in whole
+	// ShippingFeeKRW is the delivery charge quoted for this session, in whole
 	// KRW. It is fixed when the session opens so a mid-session config change
 	// cannot move the price the customer was shown.
-	ShippingFeeCents int64     `json:"shipping_fee_cents"`
-	TotalCents       int64     `json:"total_cents"`
-	OrderID          string    `json:"order_id,omitempty"`
-	ExpiresAt        time.Time `json:"expires_at"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ShippingFeeKRW int64     `json:"shipping_fee_krw"`
+	TotalCents     int64     `json:"total_cents"`
+	OrderID        string    `json:"order_id,omitempty"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// NewCheckoutSession opens a session quoting shippingFeeCents for delivery. The
+// NewCheckoutSession opens a session quoting shippingFeeKRW for delivery. The
 // fee is stored on the session so every later recalculation reuses the quote the
 // customer was first shown, rather than re-reading a config value that may have
 // changed mid-checkout.
-func NewCheckoutSession(id, customerID string, now time.Time, ttl time.Duration, shippingFeeCents int64) (*CheckoutSession, error) {
+func NewCheckoutSession(id, customerID string, now time.Time, ttl time.Duration, shippingFeeKRW int64) (*CheckoutSession, error) {
 	id = strings.TrimSpace(id)
 	customerID = strings.TrimSpace(customerID)
 	if id == "" || customerID == "" {
@@ -56,19 +56,19 @@ func NewCheckoutSession(id, customerID string, now time.Time, ttl time.Duration,
 	if ttl <= 0 {
 		ttl = DefaultCheckoutTTL
 	}
-	if shippingFeeCents < 0 {
+	if shippingFeeKRW < 0 {
 		return nil, ErrInvalidCheckoutSession
 	}
 
 	return &CheckoutSession{
-		ID:               id,
-		CustomerID:       customerID,
-		Items:            []OrderItem{},
-		Status:           CheckoutStatusOpen,
-		ShippingFeeCents: shippingFeeCents,
-		ExpiresAt:        now.Add(ttl),
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		ID:             id,
+		CustomerID:     customerID,
+		Items:          []OrderItem{},
+		Status:         CheckoutStatusOpen,
+		ShippingFeeKRW: shippingFeeKRW,
+		ExpiresAt:      now.Add(ttl),
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}, nil
 }
 
@@ -257,5 +257,5 @@ func (s *CheckoutSession) shippingFeeForTotal() int64 {
 	if len(s.Items) == 0 {
 		return 0
 	}
-	return s.ShippingFeeCents
+	return s.ShippingFeeKRW
 }

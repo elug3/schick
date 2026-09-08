@@ -24,7 +24,7 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, input CreateCheckou
 		return nil, err
 	}
 
-	session, err := domain.NewCheckoutSession(sessionID, input.CustomerID, s.now(), s.checkoutTTL, s.shippingFeeCents)
+	session, err := domain.NewCheckoutSession(sessionID, input.CustomerID, s.now(), s.checkoutTTL, s.shippingFeeKRW)
 	if err != nil {
 		return nil, err
 	}
@@ -158,17 +158,17 @@ func (s *Service) CompleteCheckout(ctx context.Context, sessionID string, input 
 		discountCents = int64(float64(subtotal) * coupon.DiscountFraction)
 	}
 
-	shippingFee := session.ShippingFeeCents
+	shippingFee := session.ShippingFeeKRW
 	order, err := s.CreateOrder(ctx, CreateOrderInput{
-		CustomerID:       session.CustomerID,
-		Items:            pricedItems,
-		CouponCode:       couponCode,
-		DiscountCents:    discountCents,
-		RecipientName:    snapshot.RecipientName,
-		RecipientPhone:   snapshot.RecipientPhone,
-		ShippingAddress:  snapshot.ShippingAddress,
-		SourceAddressID:  snapshot.SourceAddressID,
-		ShippingFeeCents: &shippingFee,
+		CustomerID:      session.CustomerID,
+		Items:           pricedItems,
+		CouponCode:      couponCode,
+		DiscountCents:   discountCents,
+		RecipientName:   snapshot.RecipientName,
+		RecipientPhone:  snapshot.RecipientPhone,
+		ShippingAddress: snapshot.ShippingAddress,
+		SourceAddressID: snapshot.SourceAddressID,
+		ShippingFeeKRW:  &shippingFee,
 	})
 	if err != nil {
 		return nil, err

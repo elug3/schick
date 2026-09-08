@@ -22,8 +22,8 @@ func TestNewOrder_AddsShippingFeeToTotal(t *testing.T) {
 	if order.SubtotalCents != 250000 {
 		t.Fatalf("subtotal = %d, want 250000", order.SubtotalCents)
 	}
-	if order.ShippingFeeCents != 3000 {
-		t.Fatalf("shipping = %d, want 3000", order.ShippingFeeCents)
+	if order.ShippingFeeKRW != 3000 {
+		t.Fatalf("shipping = %d, want 3000", order.ShippingFeeKRW)
 	}
 	if order.TotalCents != 253000 {
 		t.Fatalf("total = %d, want subtotal + shipping = 253000", order.TotalCents)
@@ -53,7 +53,7 @@ func TestNewOrder_FullDiscountStillPaysShipping(t *testing.T) {
 	if order.TotalCents != 3000 {
 		t.Fatalf("total = %d, want 3000 — the shipping fee survives a full discount", order.TotalCents)
 	}
-	if order.TotalCents < order.ShippingFeeCents {
+	if order.TotalCents < order.ShippingFeeKRW {
 		t.Fatal("total must never fall below the shipping fee")
 	}
 }
@@ -67,8 +67,8 @@ func TestNewOrder_ZeroShippingKeepsOldPricing(t *testing.T) {
 	if order.TotalCents != 225000 {
 		t.Fatalf("total = %d, want 225000 with free delivery", order.TotalCents)
 	}
-	if order.ShippingFeeCents != 0 {
-		t.Fatalf("shipping = %d, want 0", order.ShippingFeeCents)
+	if order.ShippingFeeKRW != 0 {
+		t.Fatalf("shipping = %d, want 0", order.ShippingFeeKRW)
 	}
 }
 
@@ -108,8 +108,8 @@ func TestCheckoutSession_EmptySessionQuotesNoShipping(t *testing.T) {
 	if session.TotalCents != 0 {
 		t.Fatalf("empty session total = %d, want 0 — an empty cart owes no delivery", session.TotalCents)
 	}
-	if session.ShippingFeeCents != 3000 {
-		t.Fatalf("quoted fee = %d, want the configured 3000 retained on the session", session.ShippingFeeCents)
+	if session.ShippingFeeKRW != 3000 {
+		t.Fatalf("quoted fee = %d, want the configured 3000 retained on the session", session.ShippingFeeKRW)
 	}
 }
 

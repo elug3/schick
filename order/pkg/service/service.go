@@ -35,11 +35,11 @@ type Service struct {
 	outboxDrainer  *outbox.Drainer
 	couponClient   ports.CouponClient
 	checkoutTTL    time.Duration
-	// shippingFeeCents is the flat delivery charge applied to every order, in
+	// shippingFeeKRW is the flat delivery charge applied to every order, in
 	// whole KRW. Zero (the default) means delivery is free, which keeps the
 	// service safe to run unconfigured.
-	shippingFeeCents int64
-	now              func() time.Time
+	shippingFeeKRW int64
+	now            func() time.Time
 }
 
 type CreateOrderInput struct {
@@ -52,11 +52,11 @@ type CreateOrderInput struct {
 	RecipientPhone  string
 	ShippingAddress domain.ShippingAddress
 	SourceAddressID string
-	// ShippingFeeCents, when non-nil, is the delivery charge to snapshot on
+	// ShippingFeeKRW, when non-nil, is the delivery charge to snapshot on
 	// this order (checkout complete uses the session quote). Nil uses the
 	// service-configured fee so a direct POST /orders still charges the
 	// current amount.
-	ShippingFeeCents *int64
+	ShippingFeeKRW *int64
 }
 
 type CompleteCheckoutInput struct {
@@ -120,12 +120,12 @@ func (s *Service) WithProduct(product ports.ProductClient) *Service {
 // WithShippingFee sets the flat delivery charge added to every order, in whole
 // KRW. A negative value is ignored so a misconfigured fee cannot make orders
 // cheaper than their goods.
-func (s *Service) WithShippingFee(cents int64) *Service {
-	if cents < 0 {
-		log.Printf("order: ignoring negative shipping fee %d", cents)
+func (s *Service) WithShippingFee(krw int64) *Service {
+	if krw < 0 {
+		log.Printf("order: ignoring negative shipping fee %d", krw)
 		return s
 	}
-	s.shippingFeeCents = cents
+	s.shippingFeeKRW = krw
 	return s
 }
 
@@ -165,9 +165,9 @@ func (s *Service) CreateOrder(ctx context.Context, input CreateOrderInput) (*dom
 		return nil, err
 	}
 
-	shippingFee := s.shippingFeeCents
-	if input.ShippingFeeCents != nil && *input.ShippingFeeCents >= 0 {
-		shippingFee = *input.ShippingFeeCents
+	shippingFee := s.shippingFeeKRW
+	if input.ShippingFeeKRW != nil && *input.ShippingFeeKRW >= 0 {
+		shippingFee = *input.ShippingFeeKRW
 	}
 
 	order, err := domain.NewOrder(orderID, input.CustomerID, reservationID, pricedItems, input.CouponCode, input.DiscountCents, shippingFee, s.now())
@@ -537,17 +537,17 @@ func (s *Service) marshalOrderEvent(subject string, order *domain.Order) ([]byte
 		}
 	}
 	payload, err := json.Marshal(events.Order{
-		EventType:        subject,
-		OrderID:          order.ID,
-		CustomerID:       order.CustomerID,
-		Status:           string(order.Status),
-		SubtotalCents:    order.SubtotalCents,
-		DiscountCents:    order.DiscountCents,
-		ShippingFeeCents: order.ShippingFeeCents,
-		TotalCents:       order.TotalCents,
-		Items:            items,
-		CreatedAt:        order.CreatedAt,
-		Occurred:         s.now(),
+		EventType:      subject,
+		OrderID:        order.ID,
+		CustomerID:     order.CustomerID,
+		Status:         string(order.Status),
+		SubtotalCents:  order.SubtotalCents,
+		DiscountCents:  order.DiscountCents,
+		ShippingFeeKRW: order.ShippingFeeKRW,
+		TotalCents:     order.TotalCents,
+		Items:          items,
+		CreatedAt:      order.CreatedAt,
+		Occurred:       s.now(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal %s event: %w", subject, err)

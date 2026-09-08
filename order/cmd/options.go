@@ -106,18 +106,34 @@ func applyEnv(opts *order.ServerOptions) {
 	} else if v := os.Getenv("DB_URL"); v != "" {
 		opts.DatabaseConnString = v
 	}
-	if v := os.Getenv("DUPLI1_ORDER_SHIPPING_FEE_CENTS"); v != "" {
-		if cents, err := strconv.ParseInt(v, 10, 64); err == nil && cents >= 0 {
-			opts.ShippingFeeCents = cents
-		} else {
-			log.Printf("order: ignoring invalid DUPLI1_ORDER_SHIPPING_FEE_CENTS=%q", v)
-		}
-	}
+	applyShippingFeeEnv(opts)
 	if v := os.Getenv("DUPLI1_ORDER_NATS_URL"); v != "" {
 		opts.NATSURL = v
 	} else if v := os.Getenv("NATS_URL"); v != "" {
 		opts.NATSURL = v
 	}
+}
+
+// applyShippingFeeEnv prefers DUPLI1_ORDER_SHIPPING_FEE_KRW. If that is empty,
+// it falls back to the deprecated DUPLI1_ORDER_SHIPPING_FEE_CENTS alias. Both
+// set → KRW wins. Invalid or negative values are logged and ignored so the
+// compiled default (30000) stays in place.
+func applyShippingFeeEnv(opts *order.ServerOptions) {
+	name := "DUPLI1_ORDER_SHIPPING_FEE_KRW"
+	v := os.Getenv(name)
+	if v == "" {
+		name = "DUPLI1_ORDER_SHIPPING_FEE_CENTS"
+		v = os.Getenv(name)
+	}
+	if v == "" {
+		return
+	}
+	krw, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || krw < 0 {
+		log.Printf("order: ignoring invalid %s=%q", name, v)
+		return
+	}
+	opts.ShippingFeeKRW = krw
 }
 
 func splitAddr(addr string) (string, int, error) {
