@@ -42,8 +42,8 @@ See [service-layout.md](service-layout.md) for details.
 - **Features:**
   - Login returns a **refresh token**; `POST /refresh` returns a short-lived **access token** (`token` field) plus a **rotated refresh token** (`refresh_token` field) — the token sent in is invalidated immediately
   - RS256 JWT + JWKS at `/api/v1/auth/.well-known/jwks.json`
-  - Access tokens include `type: "access"`; refresh tokens include `type: "refresh"`; both include a random `jti` so same-second issuances never collide
-  - Fine-grained **permissions** stored on users (`users.permissions TEXT[]`); JWT access tokens include `permissions` claim only
+  - Access tokens include `type: "access"`, `permissions`, and the user's login **`email`** (for downstream consumers such as NANO `compOrderMem`; not an authz claim); refresh tokens include `type: "refresh"`; both include a random `jti` so same-second issuances never collide
+  - Fine-grained **permissions** stored on users (`users.permissions TEXT[]`); JWT access tokens include `permissions` claim
   - Permission constants and evaluation in `shared/pkg/permissions` (`github.com/elug3/dupli1/shared`)
   - Wildcards: `*`, `admin.*`, `{resource}.*` (e.g. `product.*`)
   - Account types: `customer`, `manager`, `service` only (`account_type`). `admin` is a permission tier (`admin.*`), not an account type — write APIs reject it.
@@ -117,7 +117,7 @@ See [service-layout.md](service-layout.md) for details.
   - Optional `Idempotency-Key` on `POST /api/v1/orders` (replay-safe create)
   - Checkout `complete` snapshots recipient + shipping address (optional prefill from auth profile)
   - Checkout `complete` uses atomic session claim — concurrent completes cannot create duplicate orders
-  - `POST /api/v1/orders/{id}/ship` validates `paid` → `in_transit` **before** committing inventory (plan B); **requires** `carrier` + `tracking_number` (fixed KR set: `cj`/`hanjin`/`lotte`/`logen`/`epost`/`other`; `carrier_note` required when `other`)
+  - `POST /api/v1/orders/{id}/ship` validates `paid` → `in_transit` **before** committing inventory (plan B); persists via atomic **`ShipIfPaid`** (`UPDATE … WHERE status = paid`) so a concurrent full refund cancel cannot last-write-wins ship a canceled order; **requires** `carrier` + `tracking_number` (fixed KR set: `cj`/`hanjin`/`lotte`/`logen`/`epost`/`other`; `carrier_note` required when `other`)
   - Calls product to reserve stock and redeem coupons
   - Order responses include optional `carrier`, `tracking_number`, `carrier_note` after ship
 - **Auth:** Bearer JWT via `AUTH_JWKS_URL` (RS256 JWKS; HS256 fallback in dev). Storefront ABAC on `customer_id`; `order.create` / `order.read.all` bypass ABAC. Ship requires `order.ship`; status changes require `order.status.update`

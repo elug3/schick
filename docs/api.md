@@ -29,6 +29,7 @@ Authorization: Bearer <access_token>
 | `sub` | string | User ID |
 | `type` | string | `"access"` |
 | `permissions` | string[] | Fine-grained authorization strings such as `product.create`, `order.ship`, `*` |
+| `email` | string | Login email (omitted when empty). Payment reads this for NANO `compOrderMem`; not used for authorization |
 | `exp`, `iat` | number | Standard JWT timestamps |
 | `jti` | string | Random per-token ID; makes every issued token unique even if minted in the same second |
 

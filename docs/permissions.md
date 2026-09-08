@@ -37,7 +37,9 @@ Storefront **customers** are not permissions. Customer self-service stays **auth
 | `sub` | string | User ID (unchanged) |
 | `type` | string | `"access"` (unchanged) |
 | `permissions` | string[] | Fine-grained authorization strings |
+| `email` | string | User's login email (omitted when empty). Used by payment for NANO `compOrderMem`; not an authorization claim — do not trust it for access control without re-checking auth |
 | `exp`, `iat` | number | Unchanged |
+| `jti` | string | Random per-token ID; prevents same-second token collisions (required for refresh rotation) |
 
 Refresh tokens keep `sub` + `type: "refresh"` only. Permissions are loaded from the database on every refresh so revocations apply on the next access token.
 
@@ -195,6 +197,19 @@ NANO return/webhook endpoints are **unauthenticated** (callback / webhook secret
 
 `payment.cancel` is granted by the `fulfillment` bundle and by the `*` / `admin.*` wildcards. It is deliberately **not** added to the legacy `order_manager` role expansion, so existing legacy-role accounts do not silently gain the ability to move money; grant the `fulfillment` bundle (or the permission itself) to opt an account in.
 
+### Notification
+
+| Permission | Description |
+|------------|-------------|
+| `notification.telegram.read` | List Telegram subscription rows (pending/accepted users and chat IDs) |
+| `notification.telegram.manage` | Create, accept, reject, or delete Telegram subscriptions |
+
+Ops staff use these from manage-web `/telegram`. Owner `*` and `admin.*` wildcards grant both. They are **not** part of the legacy `order_manager` or `product_manager` role expansions — assign explicitly or via `admin.*` / `*`.
+
+Telegram webhook and NATS-driven outbound alerts are unauthenticated / internal; only the manager REST API requires JWT.
+
+See [notification-telegram-bot.md](notification-telegram-bot.md).
+
 ---
 
 ## Endpoint → permission matrix
@@ -305,6 +320,18 @@ registered as an alias.
 | `POST` | `/api/v1/payments` | ABAC or `payment.create`; `method=bypass` requires `payment.bypass` |
 | `GET` | `/api/v1/payments/{id}` | ABAC or `payment.read.all` |
 | `POST` | `/api/v1/payments/{id}/cancel` | `payment.cancel` (no ABAC) |
+
+### Notification service
+
+| Method | Path | Permission |
+|--------|------|------------|
+| `GET` | `/api/v1/notification/telegram/subscriptions` | `notification.telegram.read` |
+| `POST` | `/api/v1/notification/telegram/subscriptions` | `notification.telegram.manage` |
+| `POST` | `/api/v1/notification/telegram/subscriptions/{id}/accept` | `notification.telegram.manage` |
+| `POST` | `/api/v1/notification/telegram/subscriptions/{id}/reject` | `notification.telegram.manage` |
+| `DELETE` | `/api/v1/notification/telegram/subscriptions/{id}` | `notification.telegram.manage` |
+
+Webhook (`POST /api/v1/notification/telegram/webhook`) and NATS event dispatch require no JWT. Manager routes require Bearer + `AUTH_JWKS_URL` on the notification task in production.
 
 ---
 
