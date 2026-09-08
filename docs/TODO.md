@@ -59,9 +59,37 @@ See [v1.1-release-plan.md](v1.1-release-plan.md) for full slices and exit criter
 
 ## v1.2 (commerce & product — deferred)
 
-Guest cart, refunds, co-view, legacy alias removal, manager settings, Redis cache — see v1.1 plan “Deferred to v1.2” table.
+Guest cart, refunds, co-view, legacy alias removal, manager settings, Redis cache — see v1.1 plan “Deferred to v1.2” table. Storefront UX backlog from the 2026-09-08 live review is tracked below under **Storefront UX**.
 
 - [ ] **Promo / referral codes** — harden coupons (expiry, caps, ledger) + sales attribution by code/partner; no separate referral service — [product-promo-referral-code-plan.md](product-promo-referral-code-plan.md)
+
+## Storefront UX (`dupli1-web` — reviewed 2026-09-08)
+
+Live review of https://dupli1.com (desktop + mobile). Primary owner: `dupli1-web`; some items need backend/policy pages. Guest cart was already deferred to v1.2 — kept here so the UX list is complete.
+
+### Critical
+
+- [ ] **Catalog filter / sort UI** — category pages show item counts but no brand/price/availability/sort controls. Facet/sort APIs already exist (`app/lib/api.ts` / BFF); expose them in `category` (and search) UI.
+- [ ] **Footer INFO links are not links** — Shipping & Returns, Quality Guarantee, Privacy Policy, Terms render as plain `<li>` text in `dupli1-web` `app/root.tsx` (no routes). Add real pages or modals and wire the footer.
+- [ ] **Guest-readable cart** — unauthenticated `/cart` only shows “Sign in to Dupli1” (`cart.tsx` `SignInPrompt`); no guest bag preview. Align with v1.2 guest cart / merge-on-login ([product-guest-views-plan.md](product-guest-views-plan.md), [cart-service.md](cart-service.md)).
+
+### High
+
+- [ ] **Header search** — no search icon/page in the storefront header; browse is menu-only. Search BFF (`api/products/search`) exists — add header entry + results UX.
+- [ ] **OOS recovery on PDP** — out-of-stock shows disabled CTA only; no notify-me / restock alert, and recommendations rail not shown as a recovery path ([product-recommendations.md](product-recommendations.md) API already exists).
+- [ ] **Clarify shipping + promo messaging** — announcement bar `SHIPPING: ₩30,000 ON ALL ORDERS · CODE SUMMER30 — 30% OFF` reads as a flat fee and stacks unclearly with deep sale strikethroughs. Spell out fee vs free-over-threshold and how the code applies.
+- [ ] **Korean-first locale default** — primary audience is KR; `i18n` init defaults to `"en"`. Prefer `ko` when `navigator.language` / region is Korean (keep EN/ZH/JA switcher).
+- [ ] **Discount framing on cards / PDP** — large official vs sale spreads without a clear “-% off” (or equivalent) badge; reduces trust for luxury resale.
+
+### Medium / polish
+
+- [ ] **Hero copy** — “A class apart Curated luxury Dupli1” reads as a run-on; tighten EN (and ensure KO default is primary).
+- [ ] **Catalog category banner height** — large black “PRODUCT TYPE / …” band pushes the grid below the fold; shrink on desktop/mobile.
+- [ ] **Sign-in gates lack create-account CTA** — cart/profile guest prompts only offer Sign in; add Register / create account path.
+- [ ] **Mobile trust strip density** — shipping / authenticity / curation block eats first viewport; compress or combine with announcement bar.
+- [ ] **Mobile PDP breadcrumbs** — long KO+EN titles wrap/cramp; truncate or scroll cleanly.
+- [ ] **Authenticity badge on catalog cards** — homepage promises authenticity; repeat a small authenticated mark on product cards.
+- [ ] **Catalog hover / quick-view** — no secondary image or quick-view on hover; feels static for fashion retail.
 
 ## Notification service (reviewed 2026-08-07)
 
