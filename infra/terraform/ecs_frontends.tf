@@ -58,13 +58,15 @@ resource "aws_lb_target_group" "web" {
   }
 }
 
-# Admin UI — awsvpc ENI targets (same pattern as proxy).
+# Admin UI — bridge-mode like storefront (avoids one awsvpc ENI per host).
+# Host port 80 is free for bridge tasks: proxy binds :80 on its task ENI, not the host.
+# Name suffix -inst marks instance target_type (replaces former ip-mode manage-tg).
 resource "aws_lb_target_group" "manage_web" {
-  name        = "${local.name_prefix}-manage-tg"
+  name        = "${local.name_prefix}-manage-inst-tg"
   port        = 80
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
-  target_type = "ip"
+  target_type = "instance"
 
   health_check {
     enabled             = true
@@ -77,7 +79,7 @@ resource "aws_lb_target_group" "manage_web" {
   }
 
   tags = {
-    Name        = "${local.name_prefix}-manage-tg"
+    Name        = "${local.name_prefix}-manage-inst-tg"
     Environment = var.environment
     Project     = var.project_name
   }
@@ -171,6 +173,16 @@ resource "aws_security_group_rule" "alb_to_web_host" {
   source_security_group_id = aws_security_group.alb.id
 }
 
+resource "aws_security_group_rule" "alb_to_manage_host" {
+  type                     = "ingress"
+  description              = "Admin UI host port from ALB"
+  from_port                = 80
+  to_port                  = 80
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs_instances.id
+  source_security_group_id = aws_security_group.alb.id
+}
+
 resource "aws_ecs_task_definition" "web" {
   family                   = "${var.project_name}-web"
   network_mode             = "bridge"
@@ -222,7 +234,7 @@ resource "aws_ecs_task_definition" "web" {
 
 resource "aws_ecs_task_definition" "manage_web" {
   family                   = "${var.project_name}-manage-web"
-  network_mode             = "awsvpc"
+  network_mode             = "bridge"
   requires_compatibilities = ["EC2"]
   execution_role_arn       = data.aws_iam_role.ecs_task_execution.arn
   cpu                      = "256"
@@ -233,6 +245,8 @@ resource "aws_ecs_task_definition" "manage_web" {
       name      = "manage-web"
       image     = "${data.aws_ecr_repository.manage_web.repository_url}:${var.image_tag}"
       essential = true
+      memory    = 512
+      cpu       = 256
       portMappings = [
         {
           containerPort = 80
@@ -291,7 +305,7 @@ resource "aws_ecs_service" "web" {
   }
 }
 
-# Admin UI — public ALB host manage.dupli1.com (+ Cloud Map manage.dupli1.local).
+# Admin UI — bridge mode (host :80) so it does not consume an awsvpc ENI.
 resource "aws_ecs_service" "manage_web" {
   name            = "dupli1-manage-web"
   cluster         = data.aws_ecs_cluster.production.id
@@ -304,17 +318,13 @@ resource "aws_ecs_service" "manage_web" {
     base              = 1
   }
 
-  network_configuration {
-    subnets         = var.private_subnet_ids
-    security_groups = [aws_security_group.ecs_tasks.id]
-  }
-
   load_balancer {
     target_group_arn = aws_lb_target_group.manage_web.arn
     container_name   = "manage-web"
     container_port   = 80
   }
 
+  # Bridge + Cloud Map A record registers the EC2 primary IP (host :80).
   service_registries {
     registry_arn = data.aws_service_discovery_service.manage.arn
   }
@@ -324,10 +334,10 @@ resource "aws_ecs_service" "manage_web" {
     aws_lb_listener_rule.manage_https,
     aws_lb_listener_rule.manage_http,
     aws_ecs_cluster_capacity_providers.production,
+    aws_security_group_rule.alb_to_manage_host,
   ]
 
   lifecycle {
-    # Live service may still use legacy family dupli1-manage-web-task / container name.
-    ignore_changes = [desired_count, task_definition, load_balancer]
+    ignore_changes = [desired_count]
   }
 }

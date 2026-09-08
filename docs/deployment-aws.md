@@ -90,11 +90,17 @@ Cloud Map namespace: `dupli1.local` (short names: `auth`, `profile`, `product`, 
 
 ## Capacity notes
 
-User-data sets `ECS_ENABLE_AWSVPC_TRUNKING=true`, but as of **2026-07-26** hosts still only get **2 awsvpc task ENIs** per `t3.large` (no trunk ENI attached). With 10 awsvpc services, the safe ASG floor is **5** instances until trunking works for role `dupli1-production-ecs-instance`. See [aws-july-2026-cost-report.md](aws-july-2026-cost-report.md).
+User-data opts the ECS instance role into `awsvpcTrunking` (`ecs:PutAccountSetting`) before the agent registers, and sets `ECS_ENABLE_AWSVPC_TRUNKING=true`. Terraform also sets the account default. After an instance refresh, each `t3.large` should attach a trunk ENI and pack many awsvpc tasks.
+
+`dupli1-web` and `dupli1-manage-web` use **bridge** networking (no task ENI). Remaining awsvpc services fit on **2×`t3.large`** when trunking is active.
+
+Terraform ASG defaults: **desired=2 / min=1 / max=4**. If shrink still hits `RESOURCE:ENI`, hosts are not trunked — run `bash infra/scripts/shrink-ecs-asg.sh` (dry-run) then refresh instances before `APPLY=1`.
+
+See [aws-july-2026-cost-report.md](aws-july-2026-cost-report.md) and [aws-cost-reduction-plan.md](aws-cost-reduction-plan.md).
 
 ## Cost
 
-After Phase 1 cleanup (2026-07-26): orphans removed, ASG **5×`t3.large`**. Target **2×** (~$210–230/mo) needs working ENI trunking first. See [aws-july-2026-cost-report.md](aws-july-2026-cost-report.md) and [aws-cost-reduction-plan.md](aws-cost-reduction-plan.md).
+Target steady state after ASG shrink: **2×`t3.large`** (~$210–230/mo Dupli1 core). Pause when idle: `bash infra/scripts/pause-aws.sh`. See [aws-july-2026-cost-report.md](aws-july-2026-cost-report.md) and [aws-cost-reduction-plan.md](aws-cost-reduction-plan.md).
 
 ## Required GitHub configuration
 

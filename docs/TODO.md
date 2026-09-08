@@ -279,7 +279,7 @@ Architecture is suitable (ECS on EC2 + ALB + RDS + Terraform + GitHub Actions). 
 ### Remaining
 
 - [ ] **Manager settings API** — sketch in [manager-settings-api.md](manager-settings-api.md) (`GET|PATCH /api/v1/settings/{section}`).
-- [x] **Enable `awsvpcTrunking` for the ECS instance role** — confirmed live on container instances (2026-07-14); ASG Terraform defaults lowered to 2/1/4.
+- [x] **Enable `awsvpcTrunking` for the ECS instance role** — user-data `PutAccountSetting` + IAM + account default; ASG defaults 2/1/4; verify with `infra/scripts/shrink-ecs-asg.sh` after instance refresh.
 - [ ] **Create `dupli1-profile` ECR repo** — Terraform: `aws_ecr_repository.profile` + `github_actions_ecr_create` IAM. `terraform apply` (or the one-shot `aws ecr create-repository` in [deployment-aws.md](deployment-aws.md)) unblocks `Build dupli1-profile`. PowerUser cannot `CreateRepository`.
 - [x] **Prefer OIDC for backend CI** — backend `.github/workflows/aws.yml` uses `github-actions-deploy-role` (no long-lived access keys).
 - [ ] **HTTP→HTTPS redirect on ALB `:80` default action** — Terraform models redirect; live still serves HTTP for health/clients (API rule intact).
