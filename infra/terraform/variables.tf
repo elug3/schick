@@ -172,21 +172,21 @@ variable "ecs_instance_type" {
 }
 
 variable "ecs_asg_desired_capacity" {
-  description = "Desired ECS hosts. Without working awsvpcTrunking on the instance role, ~5×t3.large is required (2 task ENIs/host × 10 awsvpc tasks). With trunking active, 2 is enough."
+  description = "Desired ECS hosts. With instance-role awsvpcTrunking (user-data opt-in) and manage-web on bridge, 2×t3.large packs all services. Without trunking, raise to ~5."
   type        = number
-  default     = 5
+  default     = 2
 }
 
 variable "ecs_asg_min_size" {
   description = "Minimum number of ECS container instances."
   type        = number
-  default     = 5
+  default     = 1
 }
 
 variable "ecs_asg_max_size" {
   description = "Maximum number of ECS container instances."
   type        = number
-  default     = 6
+  default     = 4
 }
 
 variable "image_tag" {

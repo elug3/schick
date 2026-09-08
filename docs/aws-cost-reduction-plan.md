@@ -127,14 +127,17 @@ APPLY=1 DELETE_RDS_EC2=1 bash infra/scripts/cleanup-aws-orphans.sh
 
 ## Phase 2 — Shrink ECS ASG (largest Dupli1 saving)
 
-**Est. save: ~$240–300/mo** · Trunking already packs 11 tasks; 2×`t3.large` is enough (`manage-web` needs ~1 vCPU).
+**Est. save: ~$240–300/mo** · Trunking via instance-role user-data opt-in + `manage-web` on bridge; 2×`t3.large` is enough.
 
 | Step | Action |
 |------|--------|
-| 2.1 | Set ASG **min=1, desired=2, max=4** |
-| 2.2 | Wait for 4 instances to terminate; confirm all services `runningCount=1` |
-| 2.3 | Smoke-test `https://dupli1.com` gateway health + login + catalog |
-| 2.4 | Apply Terraform so next `terraform apply` does not scale back up |
+| 2.0 | `terraform apply` (trunking IAM/user-data, account default, manage-web bridge, ASG defaults 2/1/4) |
+| 2.0b | Wait for ASG instance refresh (or `start-instance-refresh`) so hosts re-register with trunk ENIs |
+| 2.0c | `bash infra/scripts/shrink-ecs-asg.sh` — expect `SAFE_TO_SHRINK=1` |
+| 2.1 | `APPLY=1 bash infra/scripts/shrink-ecs-asg.sh` (or confirm Terraform already at desired=2) |
+| 2.2 | Wait for extra instances to terminate; confirm all services `runningCount=1` |
+| 2.3 | Smoke-test `https://dupli1.com` gateway health + login + catalog + `https://manage.dupli1.com` |
+| 2.4 | Confirm `terraform plan` does not scale ASG back up |
 
 ```bash
 # Live shrink (or use Terraform apply with updated defaults)
@@ -209,13 +212,13 @@ Verify with Cost Explorer 3–5 days after Phase 2 (`EC2 - Compute` and `EC2 - O
 - [x] Phase 1.2 Sydney stopped (**2026-07-26** — `schick-test`, `mweb-vpn`)
 - [x] Phase 1.3 `dupli1-ec2` deleted (**2026-07-26** — snapshot `dupli1-ec2-final-20260726`)
 - [x] Released idle VPN EIP (**2026-07-26**)
-- [ ] Phase 2 ASG at 2× — **blocked**: trunk ENIs not attaching; ASG held at **5/5/6** after failed shrink (services restored)
-- [ ] Phase 2 prerequisite: confirm trunk ENI on each ECS host, then shrink
+- [ ] Phase 2 ASG at 2× — apply trunking user-data + manage-web bridge, instance refresh, then `infra/scripts/shrink-ecs-asg.sh`
+- [ ] Phase 2 prerequisite: hosts show ≥4 ENIs each (`SAFE_TO_SHRINK=1`)
 - [ ] Phase 2 Terraform plan does not scale ASG up
 - [ ] Phase 3 pause/resume documented for operators
 - [ ] Phase 4 decided (defer / endpoints / EC2 Compose)
 
-**Note (2026-07-26):** Phase 1 done. Phase 2 needs working `awsvpcTrunking` for role `dupli1-production-ecs-instance` before desired&lt;5. See [aws-july-2026-cost-report.md](aws-july-2026-cost-report.md).
+**Note:** Phase 1 orphans removed (2026-07-26). Phase 2 unblock: instance role self-opts into `awsvpcTrunking` in user-data (plus account default); `manage-web` uses bridge like `web`. See [deployment-aws.md](deployment-aws.md).
 
 ## Owners / scripts
 

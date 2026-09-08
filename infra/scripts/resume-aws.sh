@@ -16,7 +16,8 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 CLUSTER="${ECS_CLUSTER:-production}"
 RDS_INSTANCE="${RDS_INSTANCE:-dupli1-production}"
 ASG_NAME="${ECS_ASG_NAME:-dupli1-production-ecs-asg}"
-# 2×t3.large packs all services once awsvpcTrunking is active (manage-web is 1 vCPU).
+# 2×t3.large packs all services once instance-role awsvpcTrunking is active
+# (manage-web is bridge; verify with infra/scripts/shrink-ecs-asg.sh).
 ASG_DESIRED="${ASG_DESIRED:-2}"
 ASG_MIN="${ASG_MIN:-1}"
 ASG_MAX="${ASG_MAX:-4}"

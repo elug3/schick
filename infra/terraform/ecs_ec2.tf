@@ -118,6 +118,31 @@ resource "aws_iam_role_policy_attachment" "ecs_instance_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# Instance role must opt itself into awsvpcTrunking before the ECS agent
+# registers; otherwise each t3.large only places ~2 awsvpc tasks (no trunk ENI).
+data "aws_iam_policy_document" "ecs_instance_trunking" {
+  statement {
+    sid = "OptInAwsvpcTrunking"
+    actions = [
+      "ecs:PutAccountSetting",
+      "ecs:ListAccountSettings",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "ecs_instance_trunking" {
+  name   = "${local.name_prefix}-ecs-instance-trunking"
+  role   = aws_iam_role.ecs_instance.id
+  policy = data.aws_iam_policy_document.ecs_instance_trunking.json
+}
+
+# Account-wide default (root principal). Complements per-role opt-in in user-data.
+resource "aws_ecs_account_setting_default" "awsvpc_trunking" {
+  name  = "awsvpcTrunking"
+  value = "enabled"
+}
+
 resource "aws_iam_instance_profile" "ecs_instance" {
   name = "${local.name_prefix}-ecs-instance"
   role = aws_iam_role.ecs_instance.name
@@ -134,8 +159,20 @@ resource "aws_launch_template" "ecs" {
 
   vpc_security_group_ids = [aws_security_group.ecs_instances.id]
 
+  # Opt the instance role into trunking BEFORE writing ecs.config / agent start.
+  # Requires aws CLI on the ECS-optimized AMI (Amazon Linux 2023).
   user_data = base64encode(<<-EOT
 #!/bin/bash
+set -euxo pipefail
+TOKEN=$(curl -fsS -X PUT "http://169.254.169.254/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+REGION=$(curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" \
+  http://169.254.169.254/latest/meta-data/placement/region)
+# Self-opt-in as the container instance role (no principal-arn = caller).
+aws ecs put-account-setting \
+  --name awsvpcTrunking \
+  --value enabled \
+  --region "$REGION"
 cat > /etc/ecs/ecs.config <<EOF
 ECS_CLUSTER=${var.ecs_cluster_name}
 ECS_ENABLE_CONTAINER_METADATA=true
@@ -185,6 +222,17 @@ resource "aws_autoscaling_group" "ecs" {
     version = "$Latest"
   }
 
+  # Roll instances when the launch template changes (trunking user-data / AMI).
+  instance_refresh {
+    strategy = "Rolling"
+    triggers = ["launch_template"]
+
+    preferences {
+      min_healthy_percentage = 50
+      instance_warmup        = 120
+    }
+  }
+
   tag {
     key                 = "Name"
     value               = "${local.name_prefix}-ecs"
@@ -200,6 +248,8 @@ resource "aws_autoscaling_group" "ecs" {
   depends_on = [
     aws_nat_gateway.prod,
     aws_route.private_default_nat,
+    aws_iam_role_policy.ecs_instance_trunking,
+    aws_ecs_account_setting_default.awsvpc_trunking,
   ]
 
   lifecycle {

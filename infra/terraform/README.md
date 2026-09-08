@@ -7,7 +7,7 @@ Terraform provisions the production compute path on the existing VPC and RDS:
 | NAT Gateway (1 AZ) | Outbound for private ECS tasks (ECR, Secrets Manager, Logs) |
 | ALB | Public HTTP + HTTPS → storefront + `dupli1-proxy` |
 | Route53 aliases | `dupli1.com` / `www` → ALB |
-| EC2 ASG (`t3.large`, default 2) | ECS container instances (awsvpc trunking) |
+| EC2 ASG (`t3.large`, default 2) | ECS container instances (awsvpc trunking via instance-role opt-in) |
 | ECS capacity provider | EC2 launch type for backend services |
 | S3 | Private product-image bucket |
 | CloudFront + OAC | Public CDN for product images (`images.dupli1.com`) |
