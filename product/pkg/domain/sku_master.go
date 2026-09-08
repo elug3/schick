@@ -36,6 +36,7 @@ type Edition struct {
 
 // Well-known brand seeds (code → display name).
 var SeedBrands = []Brand{
+	{Code: "DUP", Name: "Dupli1 Studio"},
 	{Code: "PR", Name: "Prada"},
 	{Code: "BOT", Name: "Bottega Veneta"},
 	{Code: "LV", Name: "Louis Vuitton"},
