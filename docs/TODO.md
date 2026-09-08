@@ -59,9 +59,39 @@ See [v1.1-release-plan.md](v1.1-release-plan.md) for full slices and exit criter
 
 ## v1.2 (commerce & product — deferred)
 
-Guest cart, refunds, co-view, legacy alias removal, manager settings, Redis cache — see v1.1 plan “Deferred to v1.2” table.
+Guest cart, refunds, co-view, legacy alias removal, manager settings, Redis cache — see v1.1 plan “Deferred to v1.2” table. Storefront UX backlog from the 2026-09-08 live review is tracked below under **Storefront UX**.
 
 - [ ] **Promo / referral codes** — harden coupons (expiry, caps, ledger) + sales attribution by code/partner; no separate referral service — [product-promo-referral-code-plan.md](product-promo-referral-code-plan.md)
+
+## Storefront UX (`dupli1-web` — reviewed 2026-09-08)
+
+Live review of https://dupli1.com (desktop + mobile). Primary owner: `dupli1-web`; some items need backend/policy pages. Guest cart was already deferred to v1.2 — kept here so the UX list is complete.
+
+Safe polish shipped in `dupli1-web` (locale default, register CTAs, category banner, PDP breadcrumbs, discount %, PDP recommendations rail). Items that still need a product/legal decision stay open.
+
+### Critical
+
+- [ ] **Catalog filter / sort UI** — category pages show item counts but no brand/price/availability/sort controls. Facet/sort APIs already exist (`app/lib/api.ts` / BFF); expose them in `category` (and search) UI. *(deferred — UX design decision)*
+- [ ] **Footer INFO links are not links** — Shipping & Returns, Quality Guarantee, Privacy Policy, Terms render as plain `<li>` text in `dupli1-web` `app/root.tsx` (no routes). Add real pages or modals and wire the footer. *(deferred — needs legal/content)*
+- [ ] **Guest-readable cart** — unauthenticated `/cart` only shows “Sign in to Dupli1” (`cart.tsx` `SignInPrompt`); no guest bag preview. Align with v1.2 guest cart / merge-on-login ([product-guest-views-plan.md](product-guest-views-plan.md), [cart-service.md](cart-service.md)). *(deferred — commerce decision; guest sign-in gate now has Create account + continue shopping + product rail)*
+
+### High
+
+- [ ] **Header search** — no search icon/page in the storefront header; browse is menu-only. Search BFF (`api/products/search`) exists — add header entry + results UX. *(deferred — search UX decision)*
+- [x] **OOS recovery on PDP** — recommendations rail wired to `GET /api/v1/products/{id}/recommendations` (local BFF + client). Notify-me / restock alerts still deferred.
+- [ ] **Clarify shipping + promo messaging** — announcement bar `SHIPPING: ₩30,000 ON ALL ORDERS · CODE SUMMER30 — 30% OFF` reads as a flat fee and stacks unclearly with deep sale strikethroughs. Spell out fee vs free-over-threshold and how the code applies. *(deferred — pricing/promo policy)*
+- [x] **Korean-first locale default** — storefront defaults to `ko` (SSR `lang`, `LanguageProvider` fallback); still honors `localStorage` and browser locale (`en`/`zh`/`ko`).
+- [x] **Discount framing on cards / PDP** — `ProductPrice` shows `-{percent}%` when `officialPrice > price`.
+
+### Medium / polish
+
+- [ ] **Hero copy** — “A class apart Curated luxury Dupli1” reads as a run-on; tighten EN (and ensure KO default is primary). *(deferred — copy decision; KO is now the default locale)*
+- [x] **Catalog category banner height** — `CategoryShell` padding/title reduced so the grid starts earlier.
+- [x] **Sign-in gates lack create-account CTA** — cart/profile guest prompts link to `/login?mode=register`; login honors `?mode=register`.
+- [ ] **Mobile trust strip density** — shipping / authenticity / curation block eats first viewport; compress or combine with announcement bar. *(deferred — layout decision)*
+- [x] **Mobile PDP breadcrumbs** — horizontal scroll + truncate on the product name crumb.
+- [ ] **Authenticity badge on catalog cards** — homepage promises authenticity; repeat a small authenticated mark on product cards. *(deferred — design)*
+- [ ] **Catalog hover / quick-view** — no secondary image or quick-view on hover; feels static for fashion retail. *(deferred — design)*
 
 ## Notification service (reviewed 2026-08-07)
 
