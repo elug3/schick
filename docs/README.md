@@ -22,6 +22,7 @@ When the API surface changes, update [current-state.md](current-state.md) and [a
 | [profile-service.md](profile-service.md) | Customer commerce profile + saved addresses |
 | [notification-telegram-bot.md](notification-telegram-bot.md) | Ops Telegram alerts |
 | [deployment-aws.md](deployment-aws.md) | Production ECS / RDS |
+| [dupli1-production-aws-architecture.drawio](dupli1-production-aws-architecture.drawio) | Production AWS architecture diagram (draw.io) |
 | [deployment-ec2.md](deployment-ec2.md) | Single-EC2 Compose overlay |
 | [auth-logging.md](auth-logging.md) | Auth zerolog events (as-built) |
 

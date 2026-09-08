@@ -4,6 +4,8 @@ Dupli1 production runs on **ECS (EC2 launch type)** in `us-east-1`, fronted by a
 
 ## Architecture
 
+Visual reference (draw.io): [dupli1-production-aws-architecture.drawio](dupli1-production-aws-architecture.drawio).
+
 ```text
 Internet → Route53 (dupli1.com / www / manage.dupli1.com / images.dupli1.com)
         → ALB (HTTPS :443, HTTP :80)
