@@ -53,9 +53,14 @@ func (fakeCheckoutProvider) CancelPayment(_ context.Context, input ports.CancelP
 
 func makeToken(t *testing.T, secret, userID string, perms []string) string {
 	t.Helper()
+	return makeTokenWithEmail(t, secret, userID, userID+"@example.com", perms)
+}
+
+func makeTokenWithEmail(t *testing.T, secret, userID, email string, perms []string) string {
+	t.Helper()
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":         userID,
-		"email":       userID + "@example.com",
+		"email":       email,
 		"permissions": perms,
 		"exp":         time.Now().Add(time.Hour).Unix(),
 		"iat":         time.Now().Unix(),
@@ -195,6 +200,96 @@ func TestCreatePayment_BitcoinNotImplemented(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("status = %d, want 501; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Access tokens now carry email; POST /payments must snapshot it as payer_email
+// so nanoCheckout can send compOrderMem (NANO caps at 30 chars).
+func TestCreatePayment_SnapshotsJWTEmailAsPayerEmail(t *testing.T) {
+	const secret = "test-secret"
+	longEmail := "01234567890123456789012345678901@example.com"
+
+	repo := memory.NewRepository()
+	svc := service.New(repo, stubOrderClient{}, fakeCheckoutProvider{}, nil)
+	h := handler.New(svc, authjwt.NewHMACValidator(secret))
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body, _ := json.Marshal(map[string]string{"order_id": "ord-1"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/payments", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+makeTokenWithEmail(t, secret, "u-1", longEmail, nil))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", rec.Code, rec.Body.String())
+	}
+	var created domain.Payment
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.Get(t.Context(), created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if stored.PayerEmail != longEmail {
+		t.Fatalf("PayerEmail = %q, want JWT email %q", stored.PayerEmail, longEmail)
+	}
+}
+
+func TestNanoCheckout_SendsTruncatedPayerEmailAsCompOrderMem(t *testing.T) {
+	const secret = "test-secret"
+	longEmail := "01234567890123456789012345678901@example.com"
+
+	var nanoBody checkout.NanoRequest
+	nanoUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&nanoBody); err != nil {
+			t.Errorf("decode nano body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<!DOCTYPE html><html><body>NANO</body></html>"))
+	}))
+	t.Cleanup(nanoUpstream.Close)
+
+	cfg := nanoStorefrontConfig()
+	cfg.BaseURL = nanoUpstream.URL
+	cfg.HTTPClient = nanoUpstream.Client()
+	nano := checkout.NewNanoProvider(cfg)
+
+	repo := memory.NewRepository()
+	pub := &recordingPublisher{}
+	svc := service.New(repo, nanoOrderClient{}, nano, pub)
+	h := handler.New(svc, authjwt.NewHMACValidator(secret)).WithNano(nano)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	createBody, _ := json.Marshal(map[string]string{"order_id": "ord-1"})
+	createRec := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/payments", bytes.NewReader(createBody))
+	createReq.Header.Set("Authorization", "Bearer "+makeTokenWithEmail(t, secret, "u-1", longEmail, nil))
+	createReq.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("CreatePayment status = %d, want 201; body: %s", createRec.Code, createRec.Body.String())
+	}
+	var created domain.Payment
+	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := getNanoCheckout(t, mux, created.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("checkout status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	wantMem := longEmail[:30]
+	if nanoBody.CompOrderMem != wantMem {
+		t.Fatalf("compOrderMem = %q, want truncated %q", nanoBody.CompOrderMem, wantMem)
+	}
+	if nanoBody.OrderEmail != longEmail {
+		t.Fatalf("orderEmail = %q, want full JWT email %q", nanoBody.OrderEmail, longEmail)
 	}
 }
 

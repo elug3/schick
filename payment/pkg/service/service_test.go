@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -650,6 +651,42 @@ func TestCreatePayment_NanoCheckout(t *testing.T) {
 	}
 	if payment.CheckoutURL != "http://localhost:8080/api/v1/payments/"+payment.ID+"/nano/checkout" {
 		t.Fatalf("checkout_url = %s", payment.CheckoutURL)
+	}
+}
+
+// PR #244 switched NANO compOrderMem from a 36-char auth UUID to the JWT email
+// (capped at 30). The email must survive CreatePayment and land on the payment
+// row — nanoCheckout reads payment.PayerEmail when building the PG request.
+func TestCreatePayment_NanoCheckout_PersistsPayerEmail(t *testing.T) {
+	email := "01234567890123456789012345678901@example.com"
+	repo := memory.NewRepository()
+	orders := stubOrderClient{order: &ports.OrderSummary{
+		ID: "ord_1", CustomerID: "cust_1", Status: "pending", TotalCents: 70000,
+		RecipientName: "윤라희", RecipientPhone: "010-4112-5167",
+	}}
+	nano := checkout.NewNanoProvider(checkout.NanoConfig{
+		BaseURL: "https://dev3.nanopay.co.kr", Ver: "240000005", ShopCode: "240000005",
+		LoginID: "shoptest", APIKey: "test-key", PublicBaseURL: "http://localhost:8080",
+	})
+	svc := service.New(repo, orders, nano, nil)
+
+	payment, err := svc.CreatePayment(t.Context(), service.CreatePaymentInput{
+		OrderID: "ord_1", CustomerID: "cust_1", BearerToken: "token",
+		PayerEmail: "  " + email + "  ",
+	})
+	if err != nil {
+		t.Fatalf("CreatePayment: %v", err)
+	}
+	want := strings.TrimSpace(email)
+	if payment.PayerEmail != want {
+		t.Fatalf("PayerEmail = %q, want trimmed %q", payment.PayerEmail, want)
+	}
+	reloaded, err := repo.Get(t.Context(), payment.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if reloaded.PayerEmail != want {
+		t.Fatalf("stored PayerEmail = %q, want %q", reloaded.PayerEmail, want)
 	}
 }
 
