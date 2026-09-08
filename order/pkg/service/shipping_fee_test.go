@@ -23,8 +23,8 @@ func TestCreateOrder_AppliesConfiguredShippingFee(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateOrder: %v", err)
 	}
-	if order.ShippingFeeCents != 3000 {
-		t.Fatalf("shipping = %d, want the configured 3000", order.ShippingFeeCents)
+	if order.ShippingFeeKRW != 3000 {
+		t.Fatalf("shipping = %d, want the configured 3000", order.ShippingFeeKRW)
 	}
 	if order.TotalCents != 253000 {
 		t.Fatalf("total = %d, want 253000", order.TotalCents)
@@ -46,8 +46,8 @@ func TestCreateOrder_UnconfiguredServiceChargesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateOrder: %v", err)
 	}
-	if order.ShippingFeeCents != 0 || order.TotalCents != 250000 {
-		t.Fatalf("shipping = %d, total = %d; want 0 / 250000", order.ShippingFeeCents, order.TotalCents)
+	if order.ShippingFeeKRW != 0 || order.TotalCents != 250000 {
+		t.Fatalf("shipping = %d, total = %d; want 0 / 250000", order.ShippingFeeKRW, order.TotalCents)
 	}
 }
 
@@ -66,8 +66,8 @@ func TestWithShippingFee_IgnoresNegative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateOrder: %v", err)
 	}
-	if order.ShippingFeeCents != 0 {
-		t.Fatalf("shipping = %d, want a negative fee ignored", order.ShippingFeeCents)
+	if order.ShippingFeeKRW != 0 {
+		t.Fatalf("shipping = %d, want a negative fee ignored", order.ShippingFeeKRW)
 	}
 	if order.TotalCents != 250000 {
 		t.Fatalf("total = %d, want 250000", order.TotalCents)
@@ -97,9 +97,9 @@ func TestCreateOrder_ShippingFeeIsSnapshotted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrder: %v", err)
 	}
-	if reloaded.ShippingFeeCents != 3000 || reloaded.TotalCents != 253000 {
+	if reloaded.ShippingFeeKRW != 3000 || reloaded.TotalCents != 253000 {
 		t.Fatalf("reloaded shipping = %d total = %d; a config change must not re-price a placed order",
-			reloaded.ShippingFeeCents, reloaded.TotalCents)
+			reloaded.ShippingFeeKRW, reloaded.TotalCents)
 	}
 }
 
@@ -129,10 +129,10 @@ func TestCreateOrder_PublishesShippingFeeInEvent(t *testing.T) {
 	if err := json.Unmarshal(raw, &ev); err != nil {
 		t.Fatal(err)
 	}
-	if ev.ShippingFeeCents != 3000 {
-		t.Fatalf("event shipping = %d, want 3000", ev.ShippingFeeCents)
+	if ev.ShippingFeeKRW != 3000 {
+		t.Fatalf("event shipping = %d, want 3000", ev.ShippingFeeKRW)
 	}
-	if ev.SubtotalCents+ev.ShippingFeeCents-ev.DiscountCents != ev.TotalCents {
+	if ev.SubtotalCents+ev.ShippingFeeKRW-ev.DiscountCents != ev.TotalCents {
 		t.Fatalf("event totals do not reconcile: %+v", ev)
 	}
 }
@@ -160,8 +160,8 @@ func TestCompleteCheckout_UsesSessionQuotedShippingFee(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteCheckout: %v", err)
 	}
-	if result.Order.ShippingFeeCents != 3000 {
-		t.Fatalf("order shipping = %d, want the session-quoted 3000", result.Order.ShippingFeeCents)
+	if result.Order.ShippingFeeKRW != 3000 {
+		t.Fatalf("order shipping = %d, want the session-quoted 3000", result.Order.ShippingFeeKRW)
 	}
 	if result.Order.TotalCents != 253000 {
 		t.Fatalf("order total = %d, want 253000", result.Order.TotalCents)

@@ -91,9 +91,9 @@ services:
     ports: []
     environment:
       DUPLI1_ORDER_DB: postgres://dupli1:${POSTGRES_PASSWORD}@postgres:5432/orders?sslmode=disable
-      # Flat per-order delivery charge in whole KRW. Defaults to 0 (free delivery)
-      # so an unset production environment never charges customers unexpectedly.
-      DUPLI1_ORDER_SHIPPING_FEE_CENTS: ${DUPLI1_ORDER_SHIPPING_FEE_CENTS:-30000}
+      # Flat per-order delivery charge in whole KRW. Unset uses 30000; 0 is free.
+      # DUPLI1_ORDER_SHIPPING_FEE_CENTS is a deprecated alias.
+      DUPLI1_ORDER_SHIPPING_FEE_KRW: ${DUPLI1_ORDER_SHIPPING_FEE_KRW:-${DUPLI1_ORDER_SHIPPING_FEE_CENTS:-30000}}
       JWT_SECRET: ${JWT_SECRET}
       DUPLI1_ORDER_SERVICE_EMAIL: ${DUPLI1_ORDER_SERVICE_EMAIL:-dupli1-order@service.dupli1.com}
       DUPLI1_ORDER_SERVICE_PASSWORD: ${DUPLI1_ORDER_SERVICE_PASSWORD}

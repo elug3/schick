@@ -773,14 +773,14 @@ When `AUTH_JWKS_URL` or `JWT_SECRET` is set, order and checkout routes require `
 **Pricing.** Orders and checkout sessions price as:
 
 ```
-total_cents = subtotal_cents - discount_cents + shipping_fee_cents
+total_cents = subtotal_cents - discount_cents + shipping_fee_krw
 ```
 
-`shipping_fee_cents` is a flat per-order delivery charge in whole KRW, set by `DUPLI1_ORDER_SHIPPING_FEE_CENTS` on the order service. It defaults to **30000** (30,000 KRW); set the variable to `0` for free delivery.
+`shipping_fee_krw` is a flat per-order delivery charge in whole KRW, set by `DUPLI1_ORDER_SHIPPING_FEE_KRW` on the order service (deprecated alias: `DUPLI1_ORDER_SHIPPING_FEE_CENTS`). It defaults to **30000** (30,000 KRW); set the variable to `0` for free delivery. JSON, the Go field, and the Postgres column all use `shipping_fee_krw` — not `shipping_fee_cents`. Other `*_cents` money fields (`subtotal_cents`, `discount_cents`, `total_cents`, `unit_price_cents`) are unchanged.
 
 The charge applies to every order regardless of size — there is no free-shipping threshold. A coupon discounts **goods only** and is capped at `subtotal_cents`, so the total can never drop below the shipping fee: a 100%-off coupon still pays delivery. An empty checkout session quotes `total_cents: 0` rather than a bare delivery charge; the fee appears once the session has at least one item.
 
-The fee is **snapshotted** on the checkout session when it opens; `complete` charges that quoted fee even if the configured amount changed. Direct `POST /orders` uses the current configured fee. Orders created before this feature carry `shipping_fee_cents: 0` and keep their original totals.
+The fee is **snapshotted** on the checkout session when it opens; `complete` charges that quoted fee even if the configured amount changed. Direct `POST /orders` uses the current configured fee. Orders created before this feature carry `shipping_fee_krw: 0` and keep their original totals.
 
 Because `total_cents` is what the payment service charges and what the order requires to mark itself paid, the fee flows through the money path automatically.
 

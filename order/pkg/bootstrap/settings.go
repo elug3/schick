@@ -21,7 +21,7 @@ func BuildSettings(cfg Config) settings.Response {
 		// Published so storefronts quote the charge the service will actually
 		// apply, instead of hardcoding their own copy that can drift from it.
 		// Whole KRW; 0 means free delivery.
-		"shipping_fee_cents": cfg.ShippingFeeCents,
+		"shipping_fee_krw": cfg.ShippingFeeKRW,
 	}
 	apiBase, _ := resolveAPIBaseURL(cfg)
 	authBase := cfg.AuthURL

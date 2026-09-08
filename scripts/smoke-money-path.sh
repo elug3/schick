@@ -155,7 +155,7 @@ SESSION_ID=$(echo "$session" | field 'd["id"]')
 session=$(api POST "/api/v1/orders/checkout/sessions/$SESSION_ID/items" "$CUSTOMER" \
   "{\"sku_id\":\"$SKU_ID\",\"quantity\":$QUANTITY,\"unit_price_cents\":1}")
 check "session subtotal" "$(echo "$session" | field 'd["subtotal_cents"]')" "$((catalog_price * QUANTITY))"
-session_fee=$(echo "$session" | field 'd.get("shipping_fee_cents", 0)')
+session_fee=$(echo "$session" | field 'd.get("shipping_fee_krw", 0)')
 check "session total includes shipping" \
   "$(echo "$session" | field 'd["total_cents"]')" \
   "$((catalog_price * QUANTITY + session_fee))"
@@ -167,8 +167,8 @@ ORDER_ID=$(echo "$completed" | field 'd["order"]["id"]')
 [ -n "$ORDER_ID" ] && pass "order $ORDER_ID" || { fail "complete checkout: $completed"; exit 1; }
 check "order status" "$(echo "$completed" | field 'd["order"]["status"]')" pending
 # Read the delivery charge back rather than hard-coding it, so this passes at any
-# configured DUPLI1_ORDER_SHIPPING_FEE_CENTS (0 included).
-shipping_fee=$(echo "$completed" | field 'd["order"].get("shipping_fee_cents", 0)')
+# configured DUPLI1_ORDER_SHIPPING_FEE_KRW (0 included).
+shipping_fee=$(echo "$completed" | field 'd["order"].get("shipping_fee_krw", 0)')
 check "order subtotal" "$(echo "$completed" | field 'd["order"]["subtotal_cents"]')" "$((catalog_price * QUANTITY))"
 check "order total includes shipping" \
   "$(echo "$completed" | field 'd["order"]["total_cents"]')" \
