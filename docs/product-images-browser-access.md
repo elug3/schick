@@ -122,3 +122,18 @@ Local:
 curl -sI "http://localhost:8080/product-images/<key>"
 # expect: 200 from MinIO via dupli1-proxy
 ```
+
+## Listing / category sizes
+
+**Today:** category and home grids load the **original** object (`~2000×2000`, often 250–550KB JPEG/WebP). CloudFront only caches/serves that object — there is no transform query, Lambda@Edge, or stored thumb key.
+
+**Storefront stopgap (`dupli1-web`):** listing cards use `listingProductImage` / `listingBagImage` plus `loading="lazy"` (below the first row), `decoding="async"`, and a grid `sizes` hint. That improves below-the-fold loading but **does not reduce bytes** for images that still download.
+
+**Decision needed (pick one before wiring real thumbs):**
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **A. Upload-time thumbs** — on product image upload, also write e.g. `{key}/w600.webp`; API exposes listing URL | Predictable cost; works offline of CF; simple FE `src`/`srcset` | Backfill existing objects; upload path complexity |
+| **B. On-demand transform** — CloudFront + Lambda@Edge/imgproxy `?w=600` | No re-upload; flexible sizes | Ops/cold-start; cache key design; extra infra |
+
+Do **not** proxy resizes through the React Router BFF (same rule as the browser-access note above). Once A or B exists, change only `listingProductImage` / `listingBagImage` (target width `LISTING_IMAGE_WIDTH = 600`) and add `srcset`.
