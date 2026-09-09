@@ -9,8 +9,8 @@ import (
 func TestEnrichFromVariantsSummaries(t *testing.T) {
 	p := domain.Product{ID: "BOT-001", Price: 2500, OfficialPrice: 3000}
 	variants := []domain.Variant{
-		{SKU: "BOT-001-GRN", ProductID: "BOT-001", Color: "Green", Status: "active", ImageURLs: []string{"green.jpg"}},
-		{SKU: "BOT-001-BLK", ProductID: "BOT-001", Color: "Black", Status: "active", ImageURLs: []string{"black.jpg"}},
+		{SKU: "BOT-001-GRN", ProductID: "BOT-001", Color: "Green", Status: "active", ImageURLs: []string{"green.jpg"}, ListingImageURLs: []string{"green.w600.jpg"}},
+		{SKU: "BOT-001-BLK", ProductID: "BOT-001", Color: "Black", Status: "active", ImageURLs: []string{"black.jpg"}, ListingImageURLs: []string{"black.w600.jpg"}},
 		{SKU: "BOT-001-RED", ProductID: "BOT-001", Color: "Red", Status: "draft"},
 	}
 
@@ -30,6 +30,9 @@ func TestEnrichFromVariantsSummaries(t *testing.T) {
 	}
 	if p.DefaultImageURL != "green.jpg" || p.Color != "Green" {
 		t.Fatalf("default variant mirror: color=%q image=%q", p.Color, p.DefaultImageURL)
+	}
+	if p.DefaultListingImageURL != "green.w600.jpg" {
+		t.Fatalf("defaultListingImageUrl = %q", p.DefaultListingImageURL)
 	}
 }
 

@@ -29,6 +29,9 @@ func (existing Variant) MergeUpdate(incoming Variant) Variant {
 	if len(incoming.ImageURLs) > 0 {
 		merged.ImageURLs = incoming.ImageURLs
 	}
+	if len(incoming.ListingImageURLs) > 0 {
+		merged.ListingImageURLs = incoming.ListingImageURLs
+	}
 	// Dimensions: nil means omit (keep existing); non-nil replaces
 	// (including {} which NormalizeDimensions treats as clear).
 	if incoming.Dimensions != nil {
@@ -158,6 +161,9 @@ func (p *Product) EnrichFromVariants(variants []Variant, includeVariants bool) {
 		p.ImageURLs = defaultVariant.ImageURLs
 		if len(defaultVariant.ImageURLs) > 0 {
 			p.DefaultImageURL = defaultVariant.ImageURLs[0]
+		}
+		if len(defaultVariant.ListingImageURLs) > 0 {
+			p.DefaultListingImageURL = defaultVariant.ListingImageURLs[0]
 		}
 	}
 }

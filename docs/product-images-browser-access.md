@@ -97,6 +97,43 @@ New uploads after apply use the CDN base automatically.
 
 ---
 
+## Listing derivatives (upload-time thumbs)
+
+Category / home cards should not download full ~2000×2000 originals. On each successful `UploadVariantImage`, product-service also writes a **JPEG listing thumb** next to the original:
+
+| | |
+|--|--|
+| Object key | `{originalKey}.w600.jpg` (e.g. `products/…/uuid.w600.jpg`) |
+| Geometry | Longest edge ≤ **600px**, aspect preserved |
+| Encoding | JPEG quality ~82 (`image/jpeg`) — no CGO; works with `CGO_ENABLED=0` Docker builds |
+| Variant fields | `listingImageUrls` (parallel to `imageUrls`) |
+| Product fields | `defaultListingImageUrl` (first listing URL of the default/first variant) |
+
+Storefront list/search/home should prefer `defaultListingImageUrl`, then fall back to `defaultImageUrl` / first `imageUrls` entry. PDP / zoom keep the original URLs.
+
+### Backfill existing objects
+
+```bash
+# Dry-run
+cd product && DUPLI1_PRODUCT_DB='postgres://dupli1:dupli1_dev@localhost:5433/products?sslmode=disable' \
+  S3_ENDPOINT=http://localhost:9000 \
+  S3_PUBLIC_ENDPOINT=http://localhost:8080/product-images \
+  S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=minioadmin S3_BUCKET=product-images \
+  go run ./cmd/backfill-listing-images
+
+# Write objects + UPDATE variants
+… go run ./cmd/backfill-listing-images -confirm
+```
+
+Requires HTTP GET reachability to each original (public CDN / MinIO via gateway). Skips URLs that already have a sibling `.w600.jpg` in `listing_image_urls`.
+
+### Optional later
+
+- WebP/AVIF thumbs if/when the product image is built with CGO or an external encoder
+- CloudFront image transforms as a second tier
+
+---
+
 ## What not to do
 
 - Make the bucket world-readable “just for images”
