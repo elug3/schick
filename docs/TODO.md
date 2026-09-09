@@ -193,6 +193,9 @@ Implement remaining open items in [quality-bugs-fix-plan.md](quality-bugs-fix-pl
     | `/api/v1/checkout/*` | `/api/v1/orders/checkout/*` |
     | `/api/v1/carts/{id}` | `/api/v1/cart/customers/{id}` |
 - [x] **Product images CDN** — CloudFront + OAC in prod; `imageUrls` use CloudFront hosts ([product-images-browser-access.md](product-images-browser-access.md)). Checklist A2–A3 done.
+- [x] **Upload-time listing JPEG thumbs (`.w600.jpg`)** — `UploadVariantImage` writes `{key}.w600.jpg` (longest edge ≤ 600, JPEG q≈82), persists `listing_image_urls` / `defaultListingImageUrl`. Backfill: `product/cmd/backfill-listing-images`. Storefront prefers listing URL on cards. See [product-images-browser-access.md](./product-images-browser-access.md).
+- [ ] **Ops: run listing-image backfill in production** — After deploy, run `backfill-listing-images -confirm` against RDS + public CDN/MinIO so existing catalog cards stop pulling full originals.
+- [ ] **Optional: WebP/AVIF listing thumbs** — Needs CGO or an external encoder; current Docker build is `CGO_ENABLED=0`.
 - [x] **Server-side order/checkout pricing (C1)** — ignore client `unit_price_cents`; resolve from product like cart ([quality-bugs-fix-plan.md](quality-bugs-fix-plan.md)#1-c1--server-side-pricing-critical)
 - [x] Inventory service token refresh in order bootstrap
 - [x] **H1** Order create `Idempotency-Key` + transactional outbox (soft-success publish; worker drain)

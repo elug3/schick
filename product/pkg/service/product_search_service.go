@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/elug3/dupli1/product/pkg/domain"
+	"github.com/elug3/dupli1/product/pkg/imaging"
 	"github.com/elug3/dupli1/product/pkg/ports"
 	"github.com/elug3/dupli1/shared/pkg/events"
 	"github.com/google/uuid"
@@ -418,6 +420,8 @@ func (s *ProductSearchService) UploadImage(ctx context.Context, productID string
 }
 
 // UploadVariantImage uploads a file and appends its URL to the variant's ImageURLs.
+// It also writes a listing-size JPEG sibling ({key}.w600.jpg) and appends that
+// URL to ListingImageURLs for category/home cards.
 func (s *ProductSearchService) UploadVariantImage(ctx context.Context, productID, sku string, r io.Reader, size int64, contentType string) (*domain.Variant, error) {
 	if s.imageStore == nil {
 		return nil, fmt.Errorf("image store not configured")
@@ -429,12 +433,37 @@ func (s *ProductSearchService) UploadVariantImage(ctx context.Context, productID
 	if v.ProductID != productID {
 		return nil, fmt.Errorf("variant %s: %w", sku, ports.ErrNotFound)
 	}
+
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("read image: %w", err)
+	}
+	if size > 0 && int64(len(data)) != size {
+		// Multipart Size can be 0 on some clients; prefer actual bytes when mismatched.
+		_ = size
+	}
+	if len(data) == 0 {
+		return nil, ports.Invalid("empty image")
+	}
+
+	thumb, err := imaging.ListingJPEG(data, contentType)
+	if err != nil {
+		return nil, fmt.Errorf("listing thumb: %w", err)
+	}
+
 	objectKey := productID + "/" + sku + "/" + uuid.New().String()
-	url, err := s.imageStore.Upload(ctx, objectKey, r, size, contentType)
+	url, err := s.imageStore.Upload(ctx, objectKey, bytes.NewReader(data), int64(len(data)), contentType)
 	if err != nil {
 		return nil, err
 	}
+	listingKey := imaging.ListingObjectKey(objectKey)
+	listingURL, err := s.imageStore.Upload(ctx, listingKey, bytes.NewReader(thumb), int64(len(thumb)), imaging.ListingContentType)
+	if err != nil {
+		return nil, fmt.Errorf("upload listing thumb: %w", err)
+	}
+
 	v.ImageURLs = append(v.ImageURLs, url)
+	v.ListingImageURLs = append(v.ListingImageURLs, listingURL)
 	updated, err := s.store.UpdateVariant(ctx, *v)
 	if err != nil {
 		return nil, err

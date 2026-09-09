@@ -109,6 +109,7 @@ func (s *ProductSearchStore) migrate() error {
 		{"width_mm", "INTEGER"},
 		{"height_mm", "INTEGER"},
 		{"depth_mm", "INTEGER"},
+		{"listing_image_urls", "TEXT[] NOT NULL DEFAULT '{}'"},
 	} {
 		if _, err := s.pool.Exec(ctx, fmt.Sprintf(
 			"ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS %s %s", col.name, col.def,

@@ -24,6 +24,9 @@ type Variant struct {
 	Price         float64  `json:"price,omitempty"`
 	Status        string   `json:"status"` // "active" | "draft" | "archived"
 	ImageURLs     []string `json:"imageUrls,omitempty"`
+	// ListingImageURLs are ~600px JPEG thumbs parallel to ImageURLs (same index).
+	// Used by category/home cards; full ImageURLs stay on the PDP gallery.
+	ListingImageURLs []string `json:"listingImageUrls,omitempty"`
 	// ProductName is the parent product's display name, populated on public variant reads.
 	ProductName string `json:"productName,omitempty"`
 	CreatedAt   string `json:"createdAt,omitempty"`
@@ -79,10 +82,13 @@ type Product struct {
 	CreatedBy string `json:"createdBy,omitempty"`
 
 	// Summary fields derived from variants (not separate storage).
-	DefaultImageURL string    `json:"defaultImageUrl,omitempty"`
-	AvailableColors []string  `json:"availableColors,omitempty"`
-	AvailableSizes  []string  `json:"availableSizes,omitempty"`
-	Variants        []Variant `json:"variants,omitempty"`
+	DefaultImageURL string `json:"defaultImageUrl,omitempty"`
+	// DefaultListingImageURL is the listing-size JPEG for category/home cards
+	// (from the default active variant's first listingImageUrls entry).
+	DefaultListingImageURL string `json:"defaultListingImageUrl,omitempty"`
+	AvailableColors        []string `json:"availableColors,omitempty"`
+	AvailableSizes         []string `json:"availableSizes,omitempty"`
+	Variants               []Variant `json:"variants,omitempty"`
 
 	// Legacy display fields mirrored from the default active variant.
 	Color string `json:"color,omitempty"`

@@ -511,13 +511,17 @@ See [product-rich-search.md](product-rich-search.md) and [product-master-catalog
       "viewCount": 12,
       "soldCount": 3,
       "wishlistCount": 1,
-      "imageUrls": ["https://cdn.example/bot-001.jpg"]
+      "imageUrls": ["https://cdn.example/bot-001.jpg"],
+      "defaultImageUrl": "https://cdn.example/bot-001.jpg",
+      "defaultListingImageUrl": "https://cdn.example/bot-001.jpg.w600.jpg"
     }
   ]
 }
 ```
 
 `total` is the full match count before pagination; `results` is the current page.
+
+List/search/home clients should prefer `defaultListingImageUrl` (≈600px JPEG sibling of the original) when present, and fall back to `defaultImageUrl` / `imageUrls`. PDP keeps full-size `imageUrls` / variant `imageUrls`. Variants may also expose parallel `listingImageUrls`. See [product-images-browser-access.md](./product-images-browser-access.md).
 
 ### Wishlist
 
