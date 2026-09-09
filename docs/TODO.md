@@ -92,6 +92,7 @@ Safe polish shipped in `dupli1-web` (locale default, register CTAs, category ban
 - [x] **Mobile PDP breadcrumbs** — horizontal scroll + truncate on the product name crumb.
 - [ ] **Authenticity badge on catalog cards** — homepage promises authenticity; repeat a small authenticated mark on product cards. *(deferred — design)*
 - [ ] **Catalog hover / quick-view** — no secondary image or quick-view on hover; feels static for fashion retail. *(deferred — design)*
+- [ ] **Resized listing images (category / home)** — cards still download original CDN objects (~2000×2000, 250–550KB). FE stopgap: `listingProductImage` + lazy/`sizes` in `dupli1-web`. Real savings need infra decision — upload-time thumbs vs on-demand CF transform; see [product-images-browser-access.md](product-images-browser-access.md#listing--category-sizes). *(deferred — infra decision)*
 
 ## Notification service (reviewed 2026-08-07)
 
